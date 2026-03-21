@@ -139,3 +139,73 @@ func TestWatchdog(t *testing.T) {
 		t.Error("Watchdog reset NOT triggered at timeout")
 	}
 }
+
+func TestTimer4(t *testing.T) {
+	sys := &MockSystem{ioRegs: make([]uint8, 256)}
+	p := peripherals.NewManager(sys)
+
+	// 1. Test 10-bit register access via TC4H
+	p.IOCallback(peripherals.TC4H, 0x02, true)     // High bits = 2 (bit 9 set)
+	p.IOCallback(peripherals.TCNT4, 0x55, true)    // Low bits = 0x55
+	if p.Timer4Counter != 0x255 {
+		t.Errorf("Expected TCNT4 0x255, got %03X", p.Timer4Counter)
+	}
+
+	p.IOCallback(peripherals.TC4H, 0x01, true)
+	p.IOCallback(peripherals.OCR4C, 0xAA, true)
+	if p.Timer4OCR4C != 0x1AA {
+		t.Errorf("Expected OCR4C 0x1AA, got %03X", p.Timer4OCR4C)
+	}
+
+	// 2. Test reading 10-bit register
+	p.Timer4Counter = 0x3FF
+	val := p.IOCallback(peripherals.TCNT4, 0, false)
+	if val != 0xFF {
+		t.Errorf("Expected TCNT4 low byte 0xFF, got %02X", val)
+	}
+	high := p.IOCallback(peripherals.TC4H, 0, false)
+	if high != 0x03 {
+		t.Errorf("Expected TC4H 0x03, got %02X", high)
+	}
+
+	// 3. Test Timer 4 counting and overflow with OCR4C as TOP
+	p.Timer4Counter = 0x1A9
+	p.Timer4OCR4C = 0x1AA
+	p.Timer4ControlB = 0x01 // Prescaler 1
+	p.IOCallback(peripherals.TIMSK4, 1<<2, true) // TOIE4
+
+	p.Tick(1)
+	if p.Timer4Counter != 0x1AA {
+		t.Errorf("Expected TCNT4 0x1AA, got %03X", p.Timer4Counter)
+	}
+
+	p.Tick(1)
+	if p.Timer4Counter != 0 {
+		t.Errorf("Expected TCNT4 overflow to 0, got %03X", p.Timer4Counter)
+	}
+	if (sys.ints & (1 << 39)) == 0 {
+		t.Error("Expected Timer4 Overflow interrupt triggered (vector 39)")
+	}
+
+	// 4. Test PLL Clocking (PCKE)
+	sys.ints = 0
+	p.Timer4Counter = 0
+	p.Timer4OCR4C = 0x3FF // Default TOP
+	p.PLLControl = 1 << 2 // PCKE set
+	
+	// With PCKE, 1 system cycle = 4 Timer 4 cycles
+	p.Tick(1)
+	if p.Timer4Counter != 4 {
+		t.Errorf("Expected TCNT4 4 after 1 system cycle with PCKE, got %d", p.Timer4Counter)
+	}
+
+	// 5. Test OCR4A compare match
+	p.Timer4Counter = 0x100
+	p.Timer4OCR4A = 0x102
+	p.IOCallback(peripherals.TIMSK4, 1<<6, true) // OCIE4A
+	
+	p.Tick(1) // TCNT4 becomes 0x104 (with PCKE)
+	if (sys.ints & (1 << 38)) == 0 {
+		t.Error("Expected Timer4 OCR4A interrupt triggered (vector 38)")
+	}
+}

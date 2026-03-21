@@ -18,26 +18,25 @@ interrupts.
 
 ### Peripherals Implementation
 
-| Component            | Status      | Implementation Details                                                                             |
-|:---------------------|:------------|:---------------------------------------------------------------------------------------------------|
-| **Interrupts**       | Implemented | Vector table handling, prioritization, and execution logic.                                        |
-| **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR).                                          |
-| **Timer 4**          | Partial     | High-speed timer basics. See [TIMER4_ASSESSMENT.md](TIMER4_ASSESSMENT.md) for implementation gaps. |
-| **USB Controller**   | Emulated    | High-level USB CDC (Serial) emulation via virtual buffers.                                         |
-| **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                                            |
-| **EEPROM**           | Implemented | Fully functional with optional disk-backed persistence.                                            |
-| **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.                           |
-| **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                                   |
-| **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.                           |
-| **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register support.                                          |
-| **Documentation**    | Updated     | Detailed assessment for [Timer 4 implementation](TIMER4_ASSESSMENT.md).                            |
+| Component            | Status      | Implementation Details                                                          |
+|:---------------------|:------------|:--------------------------------------------------------------------------------|
+| **Interrupts**       | Implemented | Vector table handling, prioritization, and execution logic.                     |
+| **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR).                       |
+| **Timer 4**          | Implemented | 10-bit high-speed timer with PLL-based 64MHz clocking support and OCR4C as TOP. |
+| **USB Controller**   | Emulated    | High-level USB CDC (Serial) emulation via virtual buffers.                      |
+| **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                         |
+| **EEPROM**           | Implemented | Fully functional with optional disk-backed persistence.                         |
+| **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.        |
+| **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                |
+| **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.        |
+| **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register support.                       |
+| **Documentation**    | Updated     | Comprehensive implementation of ATmega32u4 core peripherals.                    |
 
 ## Known Gaps & Missing Features
 
 While the simulator is highly capable of running real-world firmware, some low-level hardware details are not yet fully simulated:
 
 - **SPM (Store Program Memory)**: The `SPM` instruction for self-programming/bootloader simulation is currently missing.
-- **Advanced Timer 4**: Lacks PLL interaction and complex 10-bit PWM logic. See [TIMER4_ASSESSMENT.md](TIMER4_ASSESSMENT.md).
 - **USB Hardware**: The simulator uses high-level CDC emulation instead of a full register-level USB 2.0 state machine.
 
 ## Project Structure
@@ -91,11 +90,11 @@ Current code coverage results (as of March 2026):
 
 | Package           | Statement Coverage            |
 |:------------------|:------------------------------|
-| `pkg/cpu`         | 20.2% (focus on core timing)  |
-| `pkg/loader`      | 84.6% (comprehensive parsing) |
+| `pkg/cpu`         | 17.4% (focus on core timing)  |
+| `pkg/loader`      | 85.0% (comprehensive parsing) |
 | `pkg/mcu`         | 41.6% (memory and interrupts) |
-| `pkg/peripherals` | 33.5% (core I/O and timers)   |
-| **Total**         | **28.6%**                     |
+| `pkg/peripherals` | 43.2% (core I/O and timers)   |
+| **Total**         | **30.5%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -126,12 +125,17 @@ go test -bench=. ./pkg/...
 
 ## Architecture & Extensibility
 
-`go32u4` is designed with modularity in mind, making it possible to extend support to other AVR-based MCUs or even different architectures:
+`go32u4` is designed with modularity in mind, making it possible to extend support to other AVR-based MCUs or even 
+different architectures:
 
-- **CPU Core (`pkg/cpu`)**: The instruction execution logic is separated from the memory bus. To support a different AVR core (e.g., ATmega328P), you would update the flash size and register mappings.
-- **Memory Bus (`pkg/bus`)**: Defines the interfaces for memory access and interrupts. Any new MCU must implement the `Bus` and `InterruptController` interfaces.
-- **Peripherals (`pkg/peripherals`)**: The `Manager` handles I/O callbacks. New hardware features can be added by implementing new cases in the `IOCallback` and updating the `Tick` function.
-- **MCU Orchestration (`pkg/mcu`)**: This package ties everything together. Adding a new chip involves creating a new struct that implements `bus.Bus` and configuring the CPU/Peripherals accordingly.
+- **CPU Core (`pkg/cpu`)**: The instruction execution logic is separated from the memory bus. To support a different 
+AVR core (e.g., ATmega328P), you would update the flash size and register mappings.
+- **Memory Bus (`pkg/bus`)**: Defines the interfaces for memory access and interrupts. Any new MCU must implement the 
+`Bus` and `InterruptController` interfaces.
+- **Peripherals (`pkg/peripherals`)**: The `Manager` handles I/O callbacks. New hardware features can be added by 
+implementing new cases in the `IOCallback` and updating the `Tick` function.
+- **MCU Orchestration (`pkg/mcu`)**: This package ties everything together. Adding a new chip involves creating a new 
+struct that implements `bus.Bus` and configuring the CPU/Peripherals accordingly.
 
 ## License
 

@@ -1,10 +1,10 @@
 package cpu_test
 
 import (
-	"testing"
-	"go32u4/pkg/mcu"
 	"go32u4/pkg/cpu"
+	"go32u4/pkg/mcu"
 	"go32u4/pkg/peripherals"
+	"testing"
 )
 
 func TestCPUInitialization(t *testing.T) {
@@ -22,12 +22,12 @@ func TestLDI(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	m.FlashData[0] = 0xE00F // LDI R16, 0x0F
 	m.FlashData[1] = 0xEF1F // LDI R17, 0xFF
-	
+
 	_ = m.Step()
 	if m.CPU.Reg[16] != 0x0F {
 		t.Errorf("Expected R16 0x0F, got %02X", m.CPU.Reg[16])
 	}
-	
+
 	_ = m.Step()
 	if m.CPU.Reg[17] != 0xFF {
 		t.Errorf("Expected R17 0xFF, got %02X", m.CPU.Reg[17])
@@ -47,7 +47,7 @@ func TestADD(t *testing.T) {
 	// For r=17, (r&0x0F) = 1, (r&0x10)<<5 = 0x0200
 	// Opcode = 0x0C00 | 0x0100 | 0x0200 | 0x0001 = 0x0F01
 	m.FlashData[0] = 0x0F01
-	
+
 	_ = m.Step()
 	if m.CPU.Reg[16] != 0x30 {
 		t.Errorf("Expected R16 0x30, got %02X", m.CPU.Reg[16])
@@ -59,10 +59,10 @@ func TestTimer0Overflow(t *testing.T) {
 	m.WriteIO(peripherals.TCCR0B, 1) // Prescaler 1
 	m.WriteIO(peripherals.TIMSK0, 1) // TOIE0
 	m.CPU.SetFlag(cpu.SREG_I, true)
-	
+
 	m.Periph.Timer0Counter = 255
 	m.FlashData[0] = 0x0000 // NOP
-	
+
 	_ = m.Step()
 	// After NOP, Timer0 should overflow
 	if m.Periph.Timer0Counter != 0 {
@@ -72,7 +72,7 @@ func TestTimer0Overflow(t *testing.T) {
 	if (m.PendingInterrupts & (1 << 23)) == 0 {
 		t.Errorf("Expected Timer0 Overflow interrupt pending")
 	}
-	
+
 	// Next step should execute interrupt
 	_ = m.Step()
 	if m.CPU.PC != 23*2 {
@@ -98,7 +98,7 @@ func TestSUB(t *testing.T) {
 	// For d=16, (16<<4) = 0x0100
 	// For r=17, (17&0x0F)=1, (17&0x10)<<5 = 0x0200
 	// Opcode = 0x1800 | 0x0100 | 0x0200 | 1 = 0x1B01
-	
+
 	_ = m.Step()
 	if m.CPU.Reg[16] != 0x10 {
 		t.Errorf("Expected R16 0x10, got %02X", m.CPU.Reg[16])
@@ -112,7 +112,7 @@ func TestRJMP(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	// RJMP +2 (1100 0000 0000 0010)
 	m.FlashData[0] = 0xC002
-	
+
 	_ = m.Step()
 	// PC started at 0, after opcode fetch PC=1. Then RJMP +2 -> PC=3
 	if m.CPU.PC != 3 {
@@ -127,12 +127,12 @@ func TestStack(t *testing.T) {
 	m.FlashData[0] = 0x930F
 	// POP R17 (1001 0001 0001 1111) -> 0x911F
 	m.FlashData[1] = 0x911F
-	
+
 	_ = m.Step()
 	if m.CPU.SP != 0x0ADE {
 		t.Errorf("Expected SP 0x0ADE, got %04X", m.CPU.SP)
 	}
-	
+
 	_ = m.Step()
 	if m.CPU.Reg[17] != 0xAA {
 		t.Errorf("Expected R17 0xAA, got %02X", m.CPU.Reg[17])

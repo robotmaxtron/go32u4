@@ -119,6 +119,17 @@ const (
 	TCCR4E = 0xC4
 	TCNT4  = 0xBE
 	TC4H   = 0xBF
+	OCR4A  = 0xCF
+	OCR4B  = 0xD0
+	OCR4C  = 0xD1
+	OCR4D  = 0xD2
+	DT4    = 0xD4
+
+	// PLL Registers
+	PLLCSR = 0x49
+	PLLE   = 1
+	PLOCK  = 0
+	PCKE   = 2
 
 	// USB Registers (Simplified CDC mapping)
 	UHWCON  = 0xD7
@@ -142,11 +153,7 @@ const (
 	UEBCLX  = 0xF2
 
 	// Power Management
-	SMCR  = 0x53 // Sleep Mode Control Register
-	OCR4A = 0xCF
-	OCR4B = 0xD0
-	OCR4C = 0xD1
-	OCR4D = 0xD2
+	SMCR = 0x53 // Sleep Mode Control Register
 
 	// Watchdog Registers
 	WDTCSR = 0x60 // Watchdog Timer Control Register
@@ -229,8 +236,21 @@ type Manager struct {
 	SleepEnabled bool
 
 	// Timer4
-	Timer4Counter  uint8
+	Timer4Counter  uint16
 	Timer4HighByte uint8
+	Timer4ControlA uint8
+	Timer4ControlB uint8
+	Timer4ControlC uint8
+	Timer4ControlD uint8
+	Timer4ControlE uint8
+	Timer4OCR4A    uint16
+	Timer4OCR4B    uint16
+	Timer4OCR4C    uint16
+	Timer4OCR4D    uint16
+	Timer4DT4      uint8
+
+	// PLL
+	PLLControl uint8
 
 	// Watchdog
 	WatchdogCycles      uint64
@@ -387,6 +407,38 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			ioRegs[address] = value
 		case UEINTX:
 			ioRegs[address] = value
+		case TC4H:
+			m.Timer4HighByte = value & 0x03
+		case TCNT4:
+			m.Timer4Counter = (uint16(m.Timer4HighByte) << 8) | uint16(value)
+		case OCR4A:
+			m.Timer4OCR4A = (uint16(m.Timer4HighByte) << 8) | uint16(value)
+		case OCR4B:
+			m.Timer4OCR4B = (uint16(m.Timer4HighByte) << 8) | uint16(value)
+		case OCR4C:
+			m.Timer4OCR4C = (uint16(m.Timer4HighByte) << 8) | uint16(value)
+		case OCR4D:
+			m.Timer4OCR4D = (uint16(m.Timer4HighByte) << 8) | uint16(value)
+		case TCCR4A:
+			m.Timer4ControlA = value
+		case TCCR4B:
+			m.Timer4ControlB = value
+		case TCCR4C:
+			m.Timer4ControlC = value
+		case TCCR4D:
+			m.Timer4ControlD = value
+		case TCCR4E:
+			m.Timer4ControlE = value
+		case DT4:
+			m.Timer4DT4 = value
+		case PLLCSR:
+			m.PLLControl = value
+			// Simulate PLOCK bit being set immediately after PLLE is set
+			if (value & (1 << PLLE)) != 0 {
+				ioRegs[PLLCSR] |= (1 << PLOCK)
+			} else {
+				ioRegs[PLLCSR] &= ^uint8(1 << PLOCK)
+			}
 		case SMCR:
 			m.SleepEnabled = (value & 0x01) != 0
 			ioRegs[address] = value
@@ -485,6 +537,37 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				return uint8(len(m.USBRXBuffer))
 			}
 			return ioRegs[address]
+		case TC4H:
+			return m.Timer4HighByte
+		case TCNT4:
+			m.Timer4HighByte = uint8(m.Timer4Counter >> 8)
+			return uint8(m.Timer4Counter & 0xFF)
+		case OCR4A:
+			m.Timer4HighByte = uint8(m.Timer4OCR4A >> 8)
+			return uint8(m.Timer4OCR4A & 0xFF)
+		case OCR4B:
+			m.Timer4HighByte = uint8(m.Timer4OCR4B >> 8)
+			return uint8(m.Timer4OCR4B & 0xFF)
+		case OCR4C:
+			m.Timer4HighByte = uint8(m.Timer4OCR4C >> 8)
+			return uint8(m.Timer4OCR4C & 0xFF)
+		case OCR4D:
+			m.Timer4HighByte = uint8(m.Timer4OCR4D >> 8)
+			return uint8(m.Timer4OCR4D & 0xFF)
+		case TCCR4A:
+			return m.Timer4ControlA
+		case TCCR4B:
+			return m.Timer4ControlB
+		case TCCR4C:
+			return m.Timer4ControlC
+		case TCCR4D:
+			return m.Timer4ControlD
+		case TCCR4E:
+			return m.Timer4ControlE
+		case DT4:
+			return m.Timer4DT4
+		case PLLCSR:
+			return m.PLLControl | (ioRegs[PLLCSR] & (1 << PLOCK))
 		default:
 			return ioRegs[address]
 		}
@@ -618,29 +701,73 @@ func (m *Manager) updateTimer3(cycles uint64) {
 
 func (m *Manager) updateTimer4(cycles uint64) {
 	ioRegs := m.Sys.IORegs()
-	prescaler := ioRegs[TCCR4B] & 0x0F
+	prescaler := m.Timer4ControlB & 0x0F
 	if prescaler == 0 {
 		return
 	}
+
+	// Clock source
+	usePLL := (m.PLLControl & (1 << PCKE)) != 0
+	
 	divisor := uint64(1)
 	if prescaler >= 1 && prescaler <= 15 {
 		divisor = 1 << (prescaler - 1)
 	}
-	for i := uint64(0); i < cycles; i++ {
-		if m.Sys.Cycles()%divisor == 0 {
-			oldVal := m.Timer4Counter
-			m.Timer4Counter++
-			if m.Timer4Counter < oldVal {
-				ioRegs[TIFR4] |= 1 << 2
-				if (ioRegs[TIMSK4] & (1 << 2)) != 0 {
-					m.Sys.TriggerInterrupt(39)
-				}
+
+	// Adjust divisor for PLL if needed (PLL is 64MHz, System is 16MHz)
+	// If PCKE is set, Timer 4 runs at 64MHz.
+	// Since Tick() is called with system cycles (16MHz), 
+	// we need to process 4 Timer 4 cycles for every 1 system cycle if PCKE is set.
+	t4Cycles := cycles
+	if usePLL {
+		t4Cycles = cycles * 4
+	}
+
+	for i := uint64(0); i < t4Cycles; i++ {
+		// This is a simplification. For precise timing, we should track sub-cycle progress.
+		// But given the current Tick(cycles) architecture, we process them in bulk.
+		
+		// If divisor is > 1, we skip ticks.
+		// For simplicity, we only tick if i % divisor == 0
+		if i % divisor != 0 {
+			continue
+		}
+		
+		m.Timer4Counter++
+
+		// OCR4C acts as TOP in many modes
+		top := m.Timer4OCR4C
+		if top == 0 {
+			top = 0x3FF // Default 10-bit TOP
+		}
+
+		if m.Timer4Counter > top {
+			m.Timer4Counter = 0
+			// Overflow interrupt
+			ioRegs[TIFR4] |= 1 << 2
+			if (ioRegs[TIMSK4] & (1 << 2)) != 0 {
+				m.Sys.TriggerInterrupt(39)
 			}
-			if m.Timer4Counter == ioRegs[OCR4A] {
-				ioRegs[TIFR4] |= 1 << 6
-				if (ioRegs[TIMSK4] & (1 << 6)) != 0 {
-					m.Sys.TriggerInterrupt(38)
-				}
+		}
+
+		if m.Timer4Counter == m.Timer4OCR4A {
+			ioRegs[TIFR4] |= 1 << 6
+			if (ioRegs[TIMSK4] & (1 << 6)) != 0 {
+				m.Sys.TriggerInterrupt(38)
+			}
+		}
+		
+		if m.Timer4Counter == m.Timer4OCR4B {
+			ioRegs[TIFR4] |= 1 << 5
+			if (ioRegs[TIMSK4] & (1 << 5)) != 0 {
+				m.Sys.TriggerInterrupt(40)
+			}
+		}
+		
+		if m.Timer4Counter == m.Timer4OCR4D {
+			ioRegs[TIFR4] |= 1 << 7
+			if (ioRegs[TIMSK4] & (1 << 7)) != 0 {
+				m.Sys.TriggerInterrupt(41)
 			}
 		}
 	}

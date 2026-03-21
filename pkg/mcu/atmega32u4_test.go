@@ -1,8 +1,8 @@
 package mcu_test
 
 import (
-	"go32u4/pkg/mcu"
 	"go32u4/pkg/cpu"
+	"go32u4/pkg/mcu"
 	"testing"
 )
 
