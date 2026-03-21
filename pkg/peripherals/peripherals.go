@@ -180,6 +180,31 @@ const (
 	WDIF = 7
 )
 
+// MCP23018 Registers
+const (
+	MCP23018_IODIRA   = 0x00
+	MCP23018_IODIRB   = 0x01
+	MCP23018_IPOLA    = 0x02
+	MCP23018_IPOLB    = 0x03
+	MCP23018_GPINTENA = 0x04
+	MCP23018_GPINTENB = 0x05
+	MCP23018_DEFVALA  = 0x06
+	MCP23018_DEFVALB  = 0x07
+	MCP23018_INTCONA  = 0x08
+	MCP23018_INTCONB  = 0x09
+	MCP23018_IOCON    = 0x0A
+	MCP23018_GPPUA    = 0x0C
+	MCP23018_GPPUB    = 0x0D
+	MCP23018_INTFA    = 0x0E
+	MCP23018_INTFB    = 0x0F
+	MCP23018_INTCAPA  = 0x10
+	MCP23018_INTCAPB  = 0x11
+	MCP23018_GPIOA    = 0x12
+	MCP23018_GPIOB    = 0x13
+	MCP23018_OLATA    = 0x14
+	MCP23018_OLATB    = 0x15
+)
+
 const EEPROMSize = 1024
 
 // Endpoint represents a USB endpoint.
@@ -292,12 +317,31 @@ type Manager struct {
 	WatchdogTimeout     uint64
 	WatchdogTimedChange uint64
 	WatchdogReset       bool
+
+	// MCP23018 Emulation
+	MCP23018_Addr     uint8
+	MCP23018_Regs     [0x16]uint8
+	MCP23018_Selected uint8
+	MCP23018_Active   bool
+	MCP23018_External uint16 // External pin states (high/low)
+
+	// I2C/TWI Pull-up
+	PullUpResistor float64 // Pull-up resistor value in ohms (default 2200)
 }
 
 func NewManager(sys System) *Manager {
-	return &Manager{
+	m := &Manager{
 		Sys: sys,
 	}
+	// Initial state for MCP23018
+	m.MCP23018_Addr = 0x20 // Default address (all address pins to ground)
+	m.MCP23018_Regs[MCP23018_IODIRA] = 0xFF
+	m.MCP23018_Regs[MCP23018_IODIRB] = 0xFF
+	m.MCP23018_External = 0xFFFF // Open-drain inputs default to high (if pull-ups enabled or external high)
+
+	// Default I2C pull-up for ErgoDox
+	m.PullUpResistor = 2200.0
+	return m
 }
 
 // IOCallback handles the core I/O behavior for ATmega32u4.
@@ -954,20 +998,189 @@ func (m *Manager) updateTimer4(cycles uint64) {
 
 func (m *Manager) updateTWIState(ioRegs []uint8) {
 	switch m.TWIState {
-	case 0x08:
+	case 0x08: // START transmitted
 		sla := ioRegs[TWDR]
-		if sla&0x01 == 0 {
-			m.TWIState = 0x18
+		addr := sla >> 1
+
+		// Verify pull-up resistor is present (realistic I2C)
+		if m.PullUpResistor > 1000000.0 {
+			// Without pull-ups, I2C bus remains low, communication fails
+			m.TWIState = 0xF8 // Error
+			m.MCP23018_Active = false
+		} else if addr == m.MCP23018_Addr {
+			m.MCP23018_Active = true
+			if sla&0x01 == 0 {
+				m.TWIState = 0x18 // SLA+W ACK
+			} else {
+				m.TWIState = 0x40 // SLA+R ACK
+				m.prepareMCP23018Read(ioRegs)
+			}
 		} else {
-			m.TWIState = 0x40
+			m.MCP23018_Active = false
+			if sla&0x01 == 0 {
+				m.TWIState = 0x18
+			} else {
+				m.TWIState = 0x40
+			}
 		}
-	case 0x18, 0x28:
+	case 0x18: // SLA+W ACK
+		if m.MCP23018_Active {
+			m.MCP23018_Selected = ioRegs[TWDR]
+		}
+		m.TWIState = 0x28 // Data ACK
+	case 0x28: // Data ACK (Write)
+		if m.MCP23018_Active {
+			reg := m.getMCP23018RegAddr(m.MCP23018_Selected)
+			val := ioRegs[TWDR]
+			if reg < 0x16 {
+				m.MCP23018_Regs[reg] = val
+				// Auto-increment register address
+				m.MCP23018_Selected++
+			}
+		}
 		m.TWIState = 0x28
-	case 0x40:
+	case 0x40: // SLA+R ACK
+		m.TWIState = 0x50 // Data ACK
+	case 0x50: // Data ACK (Read)
+		if m.MCP23018_Active {
+			m.MCP23018_Selected++
+			m.prepareMCP23018Read(ioRegs)
+		}
 		m.TWIState = 0x50
+	case 0xF8: // STOP or Error
+		m.MCP23018_Active = false
 	}
 	ioRegs[TWSR] = (ioRegs[TWSR] & 0x07) | m.TWIState
 	ioRegs[TWCR] |= 1 << 7
+}
+
+func (m *Manager) getMCP23018RegAddr(selected uint8) uint8 {
+	bank := (m.MCP23018_Regs[MCP23018_IOCON] >> 7) & 0x01
+	if bank == 0 {
+		return selected
+	}
+	// Bank 1 mapping
+	if selected <= 0x0A {
+		return selected * 2 // Port A registers
+	}
+	if selected >= 0x10 && selected <= 0x1A {
+		return (selected-0x10)*2 + 1 // Port B registers
+	}
+	return selected
+}
+
+func (m *Manager) prepareMCP23018Read(ioRegs []uint8) {
+	reg := m.getMCP23018RegAddr(m.MCP23018_Selected)
+	if reg == MCP23018_GPIOA || reg == MCP23018_GPIOB {
+		// Read actual pin state
+		var iodir, gppu, olat uint8
+		var ext uint8
+		if reg == MCP23018_GPIOA {
+			iodir = m.MCP23018_Regs[MCP23018_IODIRA]
+			gppu = m.MCP23018_Regs[MCP23018_GPPUA]
+			olat = m.MCP23018_Regs[MCP23018_OLATA]
+			ext = uint8(m.MCP23018_External & 0xFF)
+		} else {
+			iodir = m.MCP23018_Regs[MCP23018_IODIRB]
+			gppu = m.MCP23018_Regs[MCP23018_GPPUB]
+			olat = m.MCP23018_Regs[MCP23018_OLATB]
+			ext = uint8(m.MCP23018_External >> 8)
+		}
+
+		// Pin value logic:
+		// If IODIR is 0 (output), read OLAT.
+		// If IODIR is 1 (input):
+		//   If GPPU is 1 (internal pull-up), and external is high-Z (emulated by 1), value is 1.
+		//   If m.PullUpResistor is < 1M (external pull-up), and external is high-Z, value is 1.
+		//   If external is 0 (pulled low), value is 0.
+		// MCP23018 is open-drain, so outputting 1 is same as high-Z.
+		res := uint8(0)
+		for i := uint(0); i < 8; i++ {
+			isInput := (iodir & (1 << i)) != 0
+			pinExt := (ext & (1 << i)) != 0
+			hasInternalPullUp := (gppu & (1 << i)) != 0
+			hasExternalPullUp := m.PullUpResistor < 1000000.0 // 1M ohm threshold for "no pull-up"
+
+			if isInput {
+				// Input pin
+				// In open-drain context, pull-up makes it 1.
+				// External pulling low makes it 0.
+				if pinExt && (hasInternalPullUp || hasExternalPullUp) {
+					res |= (1 << i)
+				} else if pinExt && !hasInternalPullUp && !hasExternalPullUp {
+					// Floating pin, could be anything, but we'll say 0 if not pulled up
+					// In some simulators it might be randomized or fixed.
+					// For now, if no pull-up and external is 1 (high-Z), we say 0.
+					res &= ^uint8(1 << i)
+				}
+				// If !pinExt, result is 0 (pulled low by external).
+			} else {
+				// Output pin (Open-drain)
+				isHigh := (olat & (1 << i)) != 0
+				if isHigh {
+					// High-Z, follows external and pull-up
+					if pinExt || hasInternalPullUp || hasExternalPullUp {
+						res |= (1 << i)
+					}
+				} else {
+					// Driven low
+					// result is 0
+				}
+			}
+		}
+
+		// Update INTF and INTCAP if logic 0 detected on interrupt-enabled pin
+		// For ErgoDox, often interrupt-on-change is used.
+		// This is a simplified interrupt logic:
+		oldGPIO := m.MCP23018_Regs[reg]
+		changed := oldGPIO ^ res
+		var gpinten, defval, intcon uint8
+		if reg == MCP23018_GPIOA {
+			gpinten = m.MCP23018_Regs[MCP23018_GPINTENA]
+			defval = m.MCP23018_Regs[MCP23018_DEFVALA]
+			intcon = m.MCP23018_Regs[MCP23018_INTCONA]
+		} else {
+			gpinten = m.MCP23018_Regs[MCP23018_GPINTENB]
+			defval = m.MCP23018_Regs[MCP23018_DEFVALB]
+			intcon = m.MCP23018_Regs[MCP23018_INTCONB]
+		}
+
+		for i := uint(0); i < 8; i++ {
+			if (gpinten & (1 << i)) != 0 {
+				trigger := false
+				if (intcon & (1 << i)) != 0 {
+					// Compare against DEFVAL
+					bitVal := (res >> i) & 0x01
+					defBit := (defval >> i) & 0x01
+					if bitVal != defBit {
+						trigger = true
+					}
+				} else {
+					// Compare against previous pin value
+					if (changed & (1 << i)) != 0 {
+						trigger = true
+					}
+				}
+
+				if trigger {
+					if reg == MCP23018_GPIOA {
+						m.MCP23018_Regs[MCP23018_INTFA] |= (1 << i)
+						m.MCP23018_Regs[MCP23018_INTCAPA] = res
+					} else {
+						m.MCP23018_Regs[MCP23018_INTFB] |= (1 << i)
+						m.MCP23018_Regs[MCP23018_INTCAPB] = res
+					}
+				}
+			}
+		}
+
+		ioRegs[TWDR] = res
+		m.MCP23018_Regs[reg] = res
+	} else if reg < 0x16 {
+		ioRegs[TWDR] = m.MCP23018_Regs[reg]
+	} else {
+		ioRegs[TWDR] = 0xFF
+	}
 }
 
 func (m *Manager) updateWatchdog(cycles uint64) {

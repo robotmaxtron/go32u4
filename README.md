@@ -27,6 +27,7 @@ interrupts.
 | **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                         |
 | **EEPROM**           | Implemented | Fully functional with optional disk-backed persistence.                         |
 | **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.        |
+| **MCP23018**         | Implemented | Full emulation of I2C I/O expander with banked registers and pin logic.         |
 | **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                |
 | **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.        |
 | **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register support.                       |
@@ -91,11 +92,12 @@ Current code coverage results (as of March 2026):
 
 | Package           | Statement Coverage            |
 |:------------------|:------------------------------|
-| `pkg/cpu`         | 17.4% (focus on core timing)  |
+| `pkg/bus`         | 60.0% (memory interfaces)     |
+| `pkg/cpu`         | 16.8% (focus on core timing)  |
 | `pkg/loader`      | 85.0% (comprehensive parsing) |
-| `pkg/mcu`         | 41.6% (memory and interrupts) |
-| `pkg/peripherals` | 50.6% (core I/O and timers)   |
-| **Total**         | **34.0%**                     |
+| `pkg/mcu`         | 54.4% (memory and interrupts) |
+| `pkg/peripherals` | 59.9% (core I/O and timers)   |
+| **Total**         | **38.0%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -116,7 +118,7 @@ The simulator is optimized for speed, leveraging Go's efficient execution. Bench
 
 - **Instruction Execution**: ~20.2 ns/op (approx. 49.5 MHz simulated speed)
 - **Peripheral Ticking**: ~11.1 ns/op
-- **Overall Performance**: ~73.0 MHz (using `benchmark.go`)
+- **Overall Performance**: ~59.4 MHz (using `benchmark.go`)
 
 This performance exceeds the real ATmega32u4's 16 MHz clock, making it ideal for rapid firmware validation and CI pipelines.
 

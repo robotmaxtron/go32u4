@@ -82,6 +82,134 @@ func TestTWIState(t *testing.T) {
 	}
 }
 
+func TestMCP23018(t *testing.T) {
+	sys := &MockSystem{ioRegs: make([]uint8, 256)}
+	p := peripherals.NewManager(sys)
+
+	// 1. Start TWI and Address MCP23018 (0x20) for Write
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1                    // 0x40 (SLA+W)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true) // START
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)        // Trigger updateTWIState (SLA+W)
+
+	if p.TWIState != 0x18 {
+		t.Errorf("Expected TWIState 0x18, got %02X", p.TWIState)
+	}
+
+	// 2. Write Register Address (IODIRA)
+	sys.ioRegs[peripherals.TWDR] = peripherals.MCP23018_IODIRA
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true) // Data ACK
+
+	if p.TWIState != 0x28 {
+		t.Errorf("Expected TWIState 0x28, got %02X", p.TWIState)
+	}
+
+	// 3. Write Value to IODIRA (0x00 - all outputs)
+	sys.ioRegs[peripherals.TWDR] = 0x00
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true) // Data ACK
+
+	if p.MCP23018_Regs[peripherals.MCP23018_IODIRA] != 0x00 {
+		t.Errorf("Expected IODIRA 0x00, got %02X", p.MCP23018_Regs[peripherals.MCP23018_IODIRA])
+	}
+
+	// 4. STOP
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<4), true) // STOP
+
+	// 5. Read back IODIRA
+	// START + SLA+W
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	// Write register addr
+	sys.ioRegs[peripherals.TWDR] = peripherals.MCP23018_IODIRA
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	// Repeated START + SLA+R
+	sys.ioRegs[peripherals.TWDR] = (0x20 << 1) | 0x01          // 0x41 (SLA+R)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true) // Repeated START
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)        // SLA+R
+
+	if p.TWIState != 0x40 {
+		t.Errorf("Expected TWIState 0x40, got %02X", p.TWIState)
+	}
+	if sys.ioRegs[peripherals.TWDR] != 0x00 {
+		t.Errorf("Expected TWDR to have IODIRA value 0x00, got %02X", sys.ioRegs[peripherals.TWDR])
+	}
+}
+
+func TestErgoDoxMatrixScan(t *testing.T) {
+	sys := &MockSystem{ioRegs: make([]uint8, 256)}
+	p := peripherals.NewManager(sys)
+
+	// ErgoDox Left Hand (MCP23018) Initialization
+	// 1. Set IODIRA (columns) as outputs, IODIRB (rows) as inputs
+	// SLA+W
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// Reg Addr 0x00 (IODIRA)
+	sys.ioRegs[peripherals.TWDR] = 0x00
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// IODIRA = 0x00 (outputs), IODIRB = 0xFF (inputs)
+	sys.ioRegs[peripherals.TWDR] = 0x00
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	sys.ioRegs[peripherals.TWDR] = 0xFF
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// 2. Set GPPU B (rows) pull-ups enabled
+	// STOP then START
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<4), true)
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// Reg Addr 0x0D (GPPUB)
+	sys.ioRegs[peripherals.TWDR] = 0x0D
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	// GPPUB = 0xFF
+	sys.ioRegs[peripherals.TWDR] = 0xFF
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// 3. Simulate Key Press: Row 0, Col 0
+	// In ErgoDox, Columns are often driven LOW.
+	// So we set OLATA to 0xFE (Col 0 low, others high/high-Z)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<4), true)
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	sys.ioRegs[peripherals.TWDR] = 0x14 // OLATA
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	sys.ioRegs[peripherals.TWDR] = 0xFE
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// External world: User presses key at Row 0, Col 0.
+	// This connects Row 0 (PB0) to Col 0 (PA0).
+	// Since PA0 is driven LOW, PB0 will also go LOW.
+	p.MCP23018_External = 0xFEFE // PA0 (bit 0) and PB0 (bit 8) both pulled low by key connection
+
+	// 4. Scan: Read GPIOB
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<4), true)
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	sys.ioRegs[peripherals.TWDR] = 0x13 // GPIOB
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// SLA+R
+	sys.ioRegs[peripherals.TWDR] = (0x20 << 1) | 0x01
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5), true)
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+
+	// Verify result
+	res := sys.ioRegs[peripherals.TWDR]
+	if res&0x01 != 0 {
+		t.Errorf("Expected GPIOB Bit 0 to be LOW (key pressed), got %02X", res)
+	}
+	if res&0x02 == 0 {
+		t.Errorf("Expected GPIOB Bit 1 to be HIGH (key not pressed), got %02X", res)
+	}
+}
+
 func TestWatchdog(t *testing.T) {
 	sys := &MockSystem{ioRegs: make([]uint8, 256)}
 	p := peripherals.NewManager(sys)
@@ -273,5 +401,58 @@ func TestUSBFullEmulation(t *testing.T) {
 	}
 	if (p.USBEndpoints[1].Interrupt & (1 << 0)) == 0 {
 		t.Error("Expected TXINI for injected HID report")
+	}
+}
+
+func TestUSBPullUp(t *testing.T) {
+	sys := &MockSystem{ioRegs: make([]uint8, 256)}
+	p := peripherals.NewManager(sys)
+
+	// 1. Verify default pull-up
+	if p.PullUpResistor != 2200.0 {
+		t.Errorf("Expected default pull-up 2200.0, got %f", p.PullUpResistor)
+	}
+
+	// 2. Test I2C communication with default pull-up (should succeed)
+	sys.ioRegs[peripherals.TWDR] = p.MCP23018_Addr << 1
+	p.TWIState = 0x08
+	sys.ioRegs[peripherals.TWCR] = 1 << 7               // Set TWINT bit to simulate hardware ready
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true) // trigger updateTWIState by "clearing" TWINT
+	if p.TWIState != 0x18 {
+		t.Errorf("Expected TWIState 0x18 (ACK), got %02X", p.TWIState)
+	}
+
+	// 3. Test I2C communication without pull-up (should fail)
+	p.PullUpResistor = 2000000.0 // 2M ohm (too high)
+	p.TWIState = 0x08
+	sys.ioRegs[peripherals.TWCR] = 1 << 7
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	if p.TWIState != 0xF8 {
+		t.Errorf("Expected TWIState 0xF8 (Error), got %02X", p.TWIState)
+	}
+
+	// 4. Test MCP23018 pin read with and without pull-up
+	p.PullUpResistor = 2200.0
+	p.MCP23018_Addr = 0x20
+	p.MCP23018_Regs[peripherals.MCP23018_IODIRA] = 0xFF // Input
+	p.MCP23018_Regs[peripherals.MCP23018_GPPUA] = 0x00  // No internal pull-up
+	p.MCP23018_External = 0xFFFF                        // External high-Z
+
+	// Should read 1 because of external pull-up
+	p.MCP23018_Active = true
+	p.MCP23018_Selected = peripherals.MCP23018_GPIOA
+	p.TWIState = 0x50
+	sys.ioRegs[peripherals.TWCR] = 1 << 7
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	if sys.ioRegs[peripherals.TWDR] != 0xFF {
+		t.Errorf("Expected 0xFF with 2.2k pull-up, got %02X", sys.ioRegs[peripherals.TWDR])
+	}
+
+	p.PullUpResistor = 2000000.0 // No pull-up
+	p.TWIState = 0x50
+	sys.ioRegs[peripherals.TWCR] = 1 << 7
+	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true)
+	if sys.ioRegs[peripherals.TWDR] != 0x00 {
+		t.Errorf("Expected 0x00 without pull-up, got %02X", sys.ioRegs[peripherals.TWDR])
 	}
 }
