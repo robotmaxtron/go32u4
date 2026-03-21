@@ -148,28 +148,51 @@ const (
 	UECFG1X = 0xED
 	UESTA0X = 0xEE
 	UESTA1X = 0xEF
-	UEINT   = 0xF4
 	UEDATX  = 0xF1
 	UEBCLX  = 0xF2
+	UEINT   = 0xF4
 
 	// Power Management
 	SMCR = 0x53 // Sleep Mode Control Register
+
+	// SPM Control and Status Register
+	SPMCSR = 0x37
+	SPMIE  = 7
+	RWWSB  = 6
+	SIGRD  = 5
+	RWWSRE = 4
+	BLBSET = 3
+	PGWRT  = 2
+	PGERS  = 1
+	SPMEN  = 0
 
 	// Watchdog Registers
 	WDTCSR = 0x60 // Watchdog Timer Control Register
 
 	// Watchdog Timer Bits
-	WDP0  = 0
-	WDP1  = 1
-	WDP2  = 2
-	WDE   = 3
-	WDCE  = 4
-	WDP3  = 5
-	WDIE  = 6
-	WDIF  = 7
+	WDP0 = 0
+	WDP1 = 1
+	WDP2 = 2
+	WDE  = 3
+	WDCE = 4
+	WDP3 = 5
+	WDIE = 6
+	WDIF = 7
 )
 
 const EEPROMSize = 1024
+
+// Endpoint represents a USB endpoint.
+type Endpoint struct {
+	FIFO      []byte
+	SetupFIFO []byte
+	Config0   uint8
+	Config1   uint8
+	Status0   uint8
+	Status1   uint8
+	Control   uint8
+	Interrupt uint8
+}
 
 // System represents the core system that peripherals can interact with.
 type System interface {
@@ -178,6 +201,8 @@ type System interface {
 	Cycles() uint64
 	SaveEEPROM() error
 	PinCallback(port int8, mask uint8, value uint8)
+	FlashWrite(address uint16, value uint16)
+	FlashErase(address uint16)
 }
 
 // Manager manages the state and updates of hardware peripherals.
@@ -227,10 +252,20 @@ type Manager struct {
 	// ADC
 	ADCValue uint16
 
-	// USB CDC Emulation
-	USBTXBuffer      []byte
-	USBRXBuffer      []byte
-	SelectedEndpoint uint8
+	// USB Full Emulation
+	USBEndpoints   [7]Endpoint
+	USBDeviceState uint8
+	USBAddress     uint8
+	USBSelectedEP  uint8
+	USBConfigured  bool
+
+	// HID State
+	HIDKeyMap [8]uint8 // Simple keymap for emulation
+
+	// SPM State
+	SPMBuffer   [64]uint16
+	SPMPageAddr uint16
+	SPMTimeout  uint8
 
 	// Sleep
 	SleepEnabled bool
@@ -397,15 +432,48 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				m.Sys.TriggerInterrupt(24)
 			}
 		case UENUM:
-			m.SelectedEndpoint = value & 0x07
+			m.USBSelectedEP = value & 0x07
+			if m.USBSelectedEP < 7 {
+				ep := &m.USBEndpoints[m.USBSelectedEP]
+				ioRegs[UECFG0X] = ep.Config0
+				ioRegs[UECFG1X] = ep.Config1
+				ioRegs[UESTA0X] = ep.Status0
+				ioRegs[UESTA1X] = ep.Status1
+				ioRegs[UECONX] = ep.Control
+				ioRegs[UEINTX] = ep.Interrupt
+				ioRegs[UEBCLX] = uint8(len(ep.FIFO))
+			}
 			ioRegs[address] = value
 		case UEDATX:
-			if m.SelectedEndpoint == 3 || m.SelectedEndpoint == 4 {
-				m.USBTXBuffer = append(m.USBTXBuffer, value)
-				ioRegs[UEINTX] |= 1 << 0
+			if m.USBSelectedEP < 7 {
+				ep := &m.USBEndpoints[m.USBSelectedEP]
+				ep.FIFO = append(ep.FIFO, value)
+				ioRegs[UEBCLX] = uint8(len(ep.FIFO))
 			}
 			ioRegs[address] = value
 		case UEINTX:
+			if m.USBSelectedEP < 7 {
+				// Clear flags by writing 0 as per datasheet
+				m.USBEndpoints[m.USBSelectedEP].Interrupt &= value
+				ioRegs[UEINTX] = m.USBEndpoints[m.USBSelectedEP].Interrupt
+			}
+		case UECFG0X:
+			if m.USBSelectedEP < 7 {
+				m.USBEndpoints[m.USBSelectedEP].Config0 = value
+			}
+			ioRegs[address] = value
+		case UECFG1X:
+			if m.USBSelectedEP < 7 {
+				m.USBEndpoints[m.USBSelectedEP].Config1 = value
+			}
+			ioRegs[address] = value
+		case UECONX:
+			if m.USBSelectedEP < 7 {
+				m.USBEndpoints[m.USBSelectedEP].Control = value
+			}
+			ioRegs[address] = value
+		case UDADDR:
+			m.USBAddress = value & 0x7F
 			ioRegs[address] = value
 		case TC4H:
 			m.Timer4HighByte = value & 0x03
@@ -435,12 +503,20 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			m.PLLControl = value
 			// Simulate PLOCK bit being set immediately after PLLE is set
 			if (value & (1 << PLLE)) != 0 {
-				ioRegs[PLLCSR] |= (1 << PLOCK)
+				ioRegs[PLLCSR] |= 1 << PLOCK
 			} else {
 				ioRegs[PLLCSR] &= ^uint8(1 << PLOCK)
 			}
 		case SMCR:
 			m.SleepEnabled = (value & 0x01) != 0
+			ioRegs[address] = value
+		case SPMCSR:
+			// SPMCSR handling
+			// Bits: SPMIE, RWWSB, SIGRD, RWWSRE, BLBSET, PGWRT, PGERS, SPMEN
+			// SPMEN is automatically cleared after 4 cycles if not used by SPM instruction.
+			if (value & (1 << SPMEN)) != 0 {
+				m.SPMTimeout = 4
+			}
 			ioRegs[address] = value
 		case WDTCSR:
 			oldVal := ioRegs[WDTCSR]
@@ -523,20 +599,21 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 		case ADCH:
 			return uint8(m.ADCValue >> 8)
 		case UEDATX:
-			if (m.SelectedEndpoint == 3 || m.SelectedEndpoint == 4) && len(m.USBRXBuffer) > 0 {
-				val := m.USBRXBuffer[0]
-				m.USBRXBuffer = m.USBRXBuffer[1:]
-				if len(m.USBRXBuffer) == 0 {
-					ioRegs[UEINTX] &= ^uint8(1 << 1)
+			if m.USBSelectedEP < 7 {
+				ep := &m.USBEndpoints[m.USBSelectedEP]
+				if len(ep.FIFO) > 0 {
+					val := ep.FIFO[0]
+					ep.FIFO = ep.FIFO[1:]
+					ioRegs[UEBCLX] = uint8(len(ep.FIFO))
+					return val
 				}
-				return val
 			}
-			return ioRegs[address]
+			return 0
 		case UEBCLX:
-			if m.SelectedEndpoint == 3 || m.SelectedEndpoint == 4 {
-				return uint8(len(m.USBRXBuffer))
+			if m.USBSelectedEP < 7 {
+				return uint8(len(m.USBEndpoints[m.USBSelectedEP].FIFO))
 			}
-			return ioRegs[address]
+			return 0
 		case TC4H:
 			return m.Timer4HighByte
 		case TCNT4:
@@ -580,6 +657,108 @@ func (m *Manager) Tick(cycles uint64) {
 	m.updateTimer3(cycles)
 	m.updateTimer4(cycles)
 	m.updateWatchdog(cycles)
+	m.updateUSB(cycles)
+	m.updateSPM(cycles)
+}
+
+func (m *Manager) updateSPM(cycles uint64) {
+	if m.SPMTimeout > 0 {
+		if cycles >= uint64(m.SPMTimeout) {
+			m.SPMTimeout = 0
+		} else {
+			m.SPMTimeout -= uint8(cycles)
+		}
+
+		if m.SPMTimeout == 0 {
+			ioRegs := m.Sys.IORegs()
+			ioRegs[SPMCSR] &= ^uint8(1 << SPMEN)
+		}
+	}
+}
+
+func (m *Manager) updateUSB(cycles uint64) {
+	ioRegs := m.Sys.IORegs()
+
+	// Handle USB Reset
+	if (ioRegs[USBCON] & (1 << 0)) != 0 { // USBE bit
+		// Emulate a VBUS connection if USBE is set
+		ioRegs[USBSTA] |= (1 << 0) // VBUS
+	}
+
+	// Simple HID injection (emulate keys being pressed)
+	if m.USBConfigured {
+		// Example: In a real implementation, we would check for HID events here.
+		// For now, we just ensure that if HIDKeyMap is updated externally, 
+		// the data can be moved into endpoint FIFOs.
+		hidEP := &m.USBEndpoints[1] // Assume EP1 is HID IN
+		if len(hidEP.FIFO) == 0 && m.HIDKeyMap[0] != 0 {
+			hidEP.FIFO = append(hidEP.FIFO, m.HIDKeyMap[:]...)
+			hidEP.Interrupt |= (1 << 0) // TXINI
+		}
+	}
+
+	// Handle endpoint 0 (Control) setup
+	ep0 := &m.USBEndpoints[0]
+	if len(ep0.SetupFIFO) >= 8 {
+		ep0.Interrupt |= (1 << 3) // RXSTPI
+		if m.USBSelectedEP == 0 {
+			ioRegs[UEINTX] = ep0.Interrupt
+		}
+		// Trigger USB General interrupt
+		m.Sys.TriggerInterrupt(10)
+		m.handleEP0Setup(ioRegs)
+	}
+
+	// Basic endpoint interrupt handling
+	for i := 0; i < 7; i++ {
+		if m.USBEndpoints[i].Interrupt != 0 {
+			ioRegs[UEINT] |= (1 << uint(i))
+		} else {
+			ioRegs[UEINT] &= ^(1 << uint(i))
+		}
+	}
+
+	if ioRegs[UEINT] != 0 {
+		m.Sys.TriggerInterrupt(11) // USB Endpoint interrupt
+	}
+}
+
+func (m *Manager) handleEP0Setup(ioRegs []uint8) {
+	ep0 := &m.USBEndpoints[0]
+	if len(ep0.SetupFIFO) < 8 {
+		return
+	}
+	bmRequestType := ep0.SetupFIFO[0]
+	bRequest := ep0.SetupFIFO[1]
+	wValue := uint16(ep0.SetupFIFO[2]) | (uint16(ep0.SetupFIFO[3]) << 8)
+	// wIndex := uint16(ep0.SetupFIFO[4]) | (uint16(ep0.SetupFIFO[5]) << 8)
+	// wLength := uint16(ep0.SetupFIFO[6]) | (uint16(ep0.SetupFIFO[7]) << 8)
+
+	// Standard Requests
+	if (bmRequestType & 0x60) == 0 {
+		switch bRequest {
+		case 0x05: // SET_ADDRESS
+			m.USBAddress = uint8(wValue & 0x7F)
+			// Status Stage (In ACK)
+			ep0.Interrupt |= (1 << 0) // TXINI
+		case 0x09: // SET_CONFIGURATION
+			m.USBConfigured = (wValue != 0)
+			ep0.Interrupt |= (1 << 0) // TXINI
+		}
+	} else if (bmRequestType & 0x60) == 0x20 { // Class-Specific Requests
+		// Handle HID-specific requests
+		switch bRequest {
+		case 0x01: // GET_REPORT
+			// Emulate successful response for HID GetReport
+			ep0.Interrupt |= (1 << 1) // RXOUTI (ACK from host)
+		case 0x09: // SET_REPORT
+			// Emulate successful response for HID SetReport
+			ep0.Interrupt |= (1 << 0) // TXINI (ACK to host)
+		}
+	}
+
+	// Clear Setup FIFO after handling
+	ep0.SetupFIFO = ep0.SetupFIFO[8:]
 }
 
 func (m *Manager) updateTimer0(cycles uint64) {
@@ -708,7 +887,7 @@ func (m *Manager) updateTimer4(cycles uint64) {
 
 	// Clock source
 	usePLL := (m.PLLControl & (1 << PCKE)) != 0
-	
+
 	divisor := uint64(1)
 	if prescaler >= 1 && prescaler <= 15 {
 		divisor = 1 << (prescaler - 1)
@@ -716,7 +895,7 @@ func (m *Manager) updateTimer4(cycles uint64) {
 
 	// Adjust divisor for PLL if needed (PLL is 64MHz, System is 16MHz)
 	// If PCKE is set, Timer 4 runs at 64MHz.
-	// Since Tick() is called with system cycles (16MHz), 
+	// Since Tick() is called with system cycles (16MHz),
 	// we need to process 4 Timer 4 cycles for every 1 system cycle if PCKE is set.
 	t4Cycles := cycles
 	if usePLL {
@@ -726,13 +905,13 @@ func (m *Manager) updateTimer4(cycles uint64) {
 	for i := uint64(0); i < t4Cycles; i++ {
 		// This is a simplification. For precise timing, we should track sub-cycle progress.
 		// But given the current Tick(cycles) architecture, we process them in bulk.
-		
+
 		// If divisor is > 1, we skip ticks.
 		// For simplicity, we only tick if i % divisor == 0
-		if i % divisor != 0 {
+		if i%divisor != 0 {
 			continue
 		}
-		
+
 		m.Timer4Counter++
 
 		// OCR4C acts as TOP in many modes
@@ -756,14 +935,14 @@ func (m *Manager) updateTimer4(cycles uint64) {
 				m.Sys.TriggerInterrupt(38)
 			}
 		}
-		
+
 		if m.Timer4Counter == m.Timer4OCR4B {
 			ioRegs[TIFR4] |= 1 << 5
 			if (ioRegs[TIMSK4] & (1 << 5)) != 0 {
 				m.Sys.TriggerInterrupt(40)
 			}
 		}
-		
+
 		if m.Timer4Counter == m.Timer4OCR4D {
 			ioRegs[TIFR4] |= 1 << 7
 			if (ioRegs[TIMSK4] & (1 << 7)) != 0 {
@@ -811,7 +990,7 @@ func (m *Manager) updateWatchdog(cycles uint64) {
 			// Timeout occurred!
 			if (wdtcsr & (1 << WDIE)) != 0 {
 				// Interrupt Mode
-				ioRegs[WDTCSR] |= (1 << WDIF)
+				ioRegs[WDTCSR] |= 1 << WDIF
 				m.Sys.TriggerInterrupt(4) // WDT vector is 4 on ATmega32u4
 
 				// If WDE is also set, the next timeout will cause a reset.
@@ -835,9 +1014,9 @@ func (m *Manager) updateWatchdog(cycles uint64) {
 func (m *Manager) updateWatchdogTimeout(wdtcsr uint8) {
 	// Prescaler bits WDP3, WDP2, WDP1, WDP0
 	prescaler := (wdtcsr & 0x07) | ((wdtcsr & (1 << WDP3)) >> 2)
-	
+
 	// Timeout in cycles (assuming 128kHz internal oscillator for WDT on AVR)
-	// Typical ATmega32u4 has ~128kHz WDT. 
+	// Typical ATmega32u4 has ~128kHz WDT.
 	// 16MHz / 128kHz = 125 cycles of the main clock per WDT tick.
 	// But usually we just count WDT ticks.
 	// WDT Prescaler:
@@ -851,7 +1030,7 @@ func (m *Manager) updateWatchdogTimeout(wdtcsr uint8) {
 	// 7: 256K cycles (~2.0s)
 	// 8: 512K cycles (~4.0s)
 	// 9: 1024K cycles (~8.0s)
-	
+
 	wdtTicks := uint64(2048) << prescaler
 	// If the CPU is 16MHz, then 16ms is 256,000 cycles.
 	// 128 ticks of 125 cycles each = 16000 cycles? No.

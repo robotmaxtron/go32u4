@@ -23,21 +23,22 @@ interrupts.
 | **Interrupts**       | Implemented | Vector table handling, prioritization, and execution logic.                     |
 | **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR).                       |
 | **Timer 4**          | Implemented | 10-bit high-speed timer with PLL-based 64MHz clocking support and OCR4C as TOP. |
-| **USB Controller**   | Emulated    | High-level USB CDC (Serial) emulation via virtual buffers.                      |
+| **USB Controller**   | Implemented | Full register-accurate USB 2.0 endpoint management and HID emulation.           |
 | **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                         |
 | **EEPROM**           | Implemented | Fully functional with optional disk-backed persistence.                         |
 | **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.        |
 | **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                |
 | **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.        |
 | **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register support.                       |
+| **SPM**              | Implemented | Store Program Memory (SPM) for self-programming and bootloader support.         |
 | **Documentation**    | Updated     | Comprehensive implementation of ATmega32u4 core peripherals.                    |
 
 ## Known Gaps & Missing Features
 
-While the simulator is highly capable of running real-world firmware, some low-level hardware details are not yet fully simulated:
+While the simulator is highly capable of running real-world firmware, some low-level hardware details are not yet fully 
+simulated:
 
-- **SPM (Store Program Memory)**: The `SPM` instruction for self-programming/bootloader simulation is currently missing.
-- **USB Hardware**: The simulator uses high-level CDC emulation instead of a full register-level USB 2.0 state machine.
+- **Fuse Bits**: Emulation of fuse bits for clock selection and hardware configuration.
 
 ## Project Structure
 
@@ -93,8 +94,8 @@ Current code coverage results (as of March 2026):
 | `pkg/cpu`         | 17.4% (focus on core timing)  |
 | `pkg/loader`      | 85.0% (comprehensive parsing) |
 | `pkg/mcu`         | 41.6% (memory and interrupts) |
-| `pkg/peripherals` | 43.2% (core I/O and timers)   |
-| **Total**         | **30.5%**                     |
+| `pkg/peripherals` | 50.6% (core I/O and timers)   |
+| **Total**         | **34.0%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -113,8 +114,9 @@ golangci-lint run ./...
 
 The simulator is optimized for speed, leveraging Go's efficient execution. Benchmarks on an Apple M4 silicon show:
 
-- **Instruction Execution**: ~13.0 ns/op (approx. 76.9 MHz simulated speed)
-- **Peripheral Ticking**: ~0.52 ns/op
+- **Instruction Execution**: ~20.2 ns/op (approx. 49.5 MHz simulated speed)
+- **Peripheral Ticking**: ~11.1 ns/op
+- **Overall Performance**: ~73.0 MHz (using `benchmark.go`)
 
 This performance exceeds the real ATmega32u4's 16 MHz clock, making it ideal for rapid firmware validation and CI pipelines.
 
@@ -122,6 +124,31 @@ To run benchmarks:
 ```bash
 go test -bench=. ./pkg/...
 ```
+
+## Compatible & Adaptable Boards
+
+While `go32u4` is specifically tuned for the **ATmega32u4**, its modular architecture makes it highly compatible or easily adaptable to other AVR-based microcontrollers. The core AVR instruction set (AVR-6) is common across many Atmel boards.
+
+### Highly Compatible Boards
+These boards use MCUs with very similar core architectures and would require only minor configuration changes (e.g., memory mapping, interrupt vectors):
+
+- **ATmega328P (Arduino Uno/Nano)**:
+    - **Status**: Easily Adaptable.
+    - **Differences**: Smaller SRAM (2KB), different I/O register offsets, lacks USB and Timer 4.
+    - **Adaptation**: Update `pkg/mcu` to use 328P memory map and 26 interrupt vectors.
+- **ATmega2560 (Arduino Mega)**:
+    - **Status**: Adaptable.
+    - **Differences**: Larger Flash (256KB) requiring 3-byte PC support (EIND), more I/O ports, and additional timers.
+    - **Adaptation**: Extend `pkg/cpu` for 22-bit addressing and update `pkg/mcu` for the expanded I/O and SRAM.
+- **ATmega16U4 / ATmega8U4**:
+    - **Status**: Fully Compatible.
+    - **Differences**: Smaller Flash/SRAM sizes.
+    - **Adaptation**: Simply adjust `FlashSize` and `SRAMSize` constants in `pkg/mcu`.
+
+### How to Adapt for a New Board
+1. **Define Memory Map**: Create a new struct in `pkg/mcu` that implements the `bus.Bus` interface with the target MCU's SRAM and I/O layout.
+2. **Configure Interrupts**: Update the interrupt vector table handling in `handleInterrupts` to match the target datasheet.
+3. **Map Peripherals**: Link the target I/O addresses in `pkg/peripherals` to the existing `Manager` logic or add new peripheral simulations as needed.
 
 ## Architecture & Extensibility
 

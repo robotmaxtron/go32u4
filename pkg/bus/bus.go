@@ -7,6 +7,9 @@ type Bus interface {
 	ReadIO(address uint16) uint8
 	WriteIO(address uint16, value uint8)
 	Flash() []uint16
+	FlashWrite(address uint16, value uint16)
+	FlashErase(address uint16)
+	FlashCommit(address uint16)
 }
 
 // IOCallback is a function that handles specialized I/O peripheral behavior.

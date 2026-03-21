@@ -33,7 +33,7 @@ func TestMCUMemoryMapping(t *testing.T) {
 func TestMCUInterrupts(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	m.GlobalInterrupts = true
-	m.PendingInterrupts = (1 << 1) // INT0
+	m.PendingInterrupts = 1 << 1 // INT0
 
 	_ = m.Step()
 	// Should have executed interrupt 1: PC = 1 * 2 = 2

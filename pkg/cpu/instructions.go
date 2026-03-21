@@ -32,7 +32,7 @@ func (c *CPU) Execute(opcode uint16) {
 		res16 := uint16(op1) + uint16(op2)
 		res := uint8(res16)
 		c.Reg[d] = res
-		
+
 		// Update SREG
 		c.SetFlag(SREG_H, ((op1&op2)|(op2&^res)|(^res&op1))&0x08 != 0)
 		c.SetFlag(SREG_V, ((op1&op2&^res)|(^op1&^op2&res))&0x80 != 0)
@@ -56,7 +56,7 @@ func (c *CPU) Execute(opcode uint16) {
 		res16 := uint16(op1) + uint16(op2) + uint16(carry)
 		res := uint8(res16)
 		c.Reg[d] = res
-		
+
 		// Update SREG
 		c.SetFlag(SREG_H, ((op1&op2)|(op2&^res)|(^res&op1))&0x08 != 0)
 		c.SetFlag(SREG_V, ((op1&op2&^res)|(^op1&^op2&res))&0x80 != 0)
@@ -74,7 +74,7 @@ func (c *CPU) Execute(opcode uint16) {
 		op1 := c.Reg[d]
 		op2 := c.Reg[r]
 		res := op1 - op2
-		
+
 		// Update SREG
 		c.SetFlag(SREG_H, ((^op1&op2)|(op2&res)|(res&^op1))&0x08 != 0)
 		c.SetFlag(SREG_V, ((op1&^op2&^res)|(^op1&op2&res))&0x80 != 0)
@@ -82,7 +82,7 @@ func (c *CPU) Execute(opcode uint16) {
 		c.SetFlag(SREG_Z, res == 0)
 		c.SetFlag(SREG_C, ((^op1&op2)|(op2&res)|(res&^op1))&0x80 != 0)
 		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
-		
+
 		c.Reg[d] = res
 		return
 	}
@@ -94,7 +94,7 @@ func (c *CPU) Execute(opcode uint16) {
 		op1 := c.Reg[d]
 		op2 := k
 		res := op1 - op2
-		
+
 		// Update SREG
 		c.SetFlag(SREG_H, ((^op1&op2)|(op2&res)|(res&^op1))&0x08 != 0)
 		c.SetFlag(SREG_V, ((op1&^op2&^res)|(^op1&op2&res))&0x80 != 0)
@@ -102,7 +102,7 @@ func (c *CPU) Execute(opcode uint16) {
 		c.SetFlag(SREG_Z, res == 0)
 		c.SetFlag(SREG_C, ((^op1&op2)|(op2&res)|(res&^op1))&0x80 != 0)
 		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
-		
+
 		c.Reg[d] = res
 		return
 	}
@@ -118,7 +118,7 @@ func (c *CPU) Execute(opcode uint16) {
 			carry = 1
 		}
 		res := op1 - op2 - carry
-		
+
 		// Update SREG
 		c.SetFlag(SREG_H, ((^op1&op2)|(op2&res)|(res&^op1))&0x08 != 0)
 		c.SetFlag(SREG_V, ((op1&^op2&^res)|(^op1&op2&res))&0x80 != 0)
@@ -126,7 +126,7 @@ func (c *CPU) Execute(opcode uint16) {
 		c.SetFlag(SREG_Z, res == 0 && c.GetFlag(SREG_Z))
 		c.SetFlag(SREG_C, ((^op1&op2)|(op2&res)|(res&^op1))&0x80 != 0)
 		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
-		
+
 		c.Reg[d] = res
 		return
 	}
@@ -297,7 +297,7 @@ func (c *CPU) Execute(opcode uint16) {
 	// BSET (1001 0100 0sss 1000) - SEC, SEZ, etc.
 	if opcode&0xFF8F == 0x9408 {
 		s := uint8((opcode >> 4) & 0x07)
-		c.SREG |= (1 << s)
+		c.SREG |= 1 << s
 		return
 	}
 
@@ -506,6 +506,31 @@ func (c *CPU) Execute(opcode uint16) {
 		return
 	}
 
+	// SPM (1001 0101 1110 1000)
+	if opcode == 0x95e8 {
+		spmcsr := c.ReadIO(0x37) // SPMCSR
+		if spmcsr&0x01 != 0 {    // SPMEN
+			z := uint16(c.Reg[30]) | (uint16(c.Reg[31]) << 8)
+			if spmcsr&0x02 != 0 { // PGERS (Page Erase)
+				c.Bus.FlashErase(z / 2)
+				c.Cycles += 1 // Dummy cycles
+				c.TickPeripheralsHelper(1)
+			} else if spmcsr&0x04 != 0 { // PGWRT (Page Write)
+				c.Bus.FlashCommit(z / 2)
+				c.Cycles += 1 // Dummy cycles
+				c.TickPeripheralsHelper(1)
+			} else if spmcsr&0x10 != 0 { // RWWSRE
+				// Read-While-Write Section Enable - not fully simulated
+			} else { // Fill temporary buffer
+				word := uint16(c.Reg[0]) | (uint16(c.Reg[1]) << 8)
+				c.Bus.FlashWrite(z / 2, word)
+			}
+			// Clear action bits
+			c.WriteIO(0x37, spmcsr & ^uint8(0x17))
+		}
+		return
+	}
+
 	// RCALL (1101 kkkk kkkk kkkk)
 	if opcode&0xF000 == 0xD000 {
 		k := int16(opcode & 0x0FFF)
@@ -690,7 +715,7 @@ func (c *CPU) Execute(opcode uint16) {
 		c.TickPeripheralsHelper(2)
 		return
 	}
-	
+
 	// LPM Rd, Z+ (1001 000d dddd 0101)
 	if opcode&0xFE0F == 0x9005 {
 		d := (opcode >> 4) & 0x1F
@@ -715,8 +740,7 @@ func (c *CPU) Execute(opcode uint16) {
 		// For now we'll just skip it or add a Sleep method to CPU
 		return
 	}
-	
+
 	// Default to NOP for unimplemented instructions for now
 	// fmt.Printf("Unimplemented opcode: %04X\n", opcode)
 }
-

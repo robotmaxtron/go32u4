@@ -7,9 +7,9 @@ import (
 
 // ATmega32u4 Constants
 const (
-	FlashSize = 32768
+	FlashSize    = 32768
 	RegisterSize = 32
-	IORegSize = 64
+	IORegSize    = 64
 	ExtIORegSize = 160
 
 	SREG_C = 0
@@ -30,22 +30,22 @@ type CPU struct {
 	SP     uint16
 	Cycles uint64
 	Halted bool
-	
+
 	// Bus is the connection to memory and peripherals.
 	Bus bus.Bus
-	
+
 	// InterruptController handles interrupt dispatching.
 	InterruptController bus.InterruptController
-	
+
 	// TickPeripherals is called to update peripheral state.
 	TickPeripherals func(cycles uint64)
 }
 
 func NewCPU(b bus.Bus, ic bus.InterruptController) *CPU {
 	return &CPU{
-		PC: 0,
-		SP: uint16(IORegSize + ExtIORegSize + 2560 - 1), // Default top of SRAM for 32u4
-		Bus: b,
+		PC:                  0,
+		SP:                  uint16(IORegSize + ExtIORegSize + 2560 - 1), // Default top of SRAM for 32u4
+		Bus:                 b,
 		InterruptController: ic,
 	}
 }
@@ -72,7 +72,7 @@ func (c *CPU) Step() error {
 
 func (c *CPU) SetFlag(bit uint8, value bool) {
 	if value {
-		c.SREG |= (1 << bit)
+		c.SREG |= 1 << bit
 	} else {
 		c.SREG &= ^(1 << bit)
 	}

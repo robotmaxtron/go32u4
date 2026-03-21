@@ -95,10 +95,44 @@ func (m *ATmega32u4) WriteIO(address uint16, value uint8) {
 }
 
 func (m *ATmega32u4) Flash() []uint16 { return m.FlashData[:] }
+func (m *ATmega32u4) FlashWrite(address uint16, value uint16) {
+	if int(address) < len(m.FlashData) {
+		// If SPMCSR.SPMEN is set and no other bits, it's a buffer write.
+		spmcsr := m.ReadIO(0x37)
+		if spmcsr&0x01 != 0 && spmcsr&0x1E == 0 {
+			m.Periph.SPMBuffer[address%64] = value
+		} else {
+			m.FlashData[address] = value
+		}
+	}
+}
+
+func (m *ATmega32u4) FlashErase(address uint16) {
+	// Address is a word address. Erase a page.
+	// Page size for 32u4 is 128 bytes (64 words).
+	pageSizeWords := uint16(64)
+	pageStart := (address / pageSizeWords) * pageSizeWords
+	for i := uint16(0); i < pageSizeWords; i++ {
+		if int(pageStart+i) < len(m.FlashData) {
+			m.FlashData[pageStart+i] = 0xFFFF
+		}
+	}
+}
+
+func (m *ATmega32u4) FlashCommit(address uint16) {
+	// Commits SPM buffer to flash page
+	pageSizeWords := uint16(64)
+	pageStart := (address / pageSizeWords) * pageSizeWords
+	for i := uint16(0); i < pageSizeWords; i++ {
+		if int(pageStart+i) < len(m.FlashData) {
+			m.FlashData[pageStart+i] = m.Periph.SPMBuffer[i]
+		}
+	}
+}
 
 // IORegs peripherals.System implementation
 func (m *ATmega32u4) IORegs() []uint8               { return m.IORegData[:] }
-func (m *ATmega32u4) TriggerInterrupt(vector uint8) { m.PendingInterrupts |= (1 << vector) }
+func (m *ATmega32u4) TriggerInterrupt(vector uint8) { m.PendingInterrupts |= 1 << vector }
 func (m *ATmega32u4) Cycles() uint64                { return m.CPU.Cycles }
 func (m *ATmega32u4) SaveEEPROM() error {
 	if m.EEPROMFile == "" {
