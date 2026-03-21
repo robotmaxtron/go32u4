@@ -63,6 +63,11 @@ func (c *CPU) Step() error {
 	opcode := flash[c.PC]
 	c.PC++
 	c.Execute(opcode)
+	if c.Halted {
+		// If instruction caused halt (e.g. SLEEP), don't increment cycles here
+		// as it might be handled by the caller (MCU)
+		return nil
+	}
 	c.Cycles++
 	if c.TickPeripherals != nil {
 		c.TickPeripherals(1)

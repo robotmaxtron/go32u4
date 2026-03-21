@@ -260,7 +260,8 @@ type Manager struct {
 	Timer3InputCap uint16
 
 	// EEPROM
-	EEPROM [EEPROMSize]uint8
+	EEPROM           [EEPROMSize]uint8
+	EEPROMWriteTimer uint64
 
 	// USART1
 	UART1TXBuffer []byte
@@ -392,6 +393,14 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			m.Timer1CompareA = (m.Timer1CompareA & 0xFF00) | uint16(value)
 		case OCR1AH:
 			m.Timer1CompareA = (m.Timer1CompareA & 0x00FF) | (uint16(value) << 8)
+		case OCR1BL:
+			m.Timer1CompareB = (m.Timer1CompareB & 0xFF00) | uint16(value)
+		case OCR1BH:
+			m.Timer1CompareB = (m.Timer1CompareB & 0x00FF) | (uint16(value) << 8)
+		case OCR1CL:
+			m.Timer1CompareC = (m.Timer1CompareC & 0xFF00) | uint16(value)
+		case OCR1CH:
+			m.Timer1CompareC = (m.Timer1CompareC & 0x00FF) | (uint16(value) << 8)
 		case TCCR1A:
 			m.Timer1ControlA = value
 		case TCCR1B:
@@ -404,6 +413,14 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			m.Timer3CompareA = (m.Timer3CompareA & 0xFF00) | uint16(value)
 		case OCR3AH:
 			m.Timer3CompareA = (m.Timer3CompareA & 0x00FF) | (uint16(value) << 8)
+		case OCR3BL:
+			m.Timer3CompareB = (m.Timer3CompareB & 0xFF00) | uint16(value)
+		case OCR3BH:
+			m.Timer3CompareB = (m.Timer3CompareB & 0x00FF) | (uint16(value) << 8)
+		case OCR3CL:
+			m.Timer3CompareC = (m.Timer3CompareC & 0xFF00) | uint16(value)
+		case OCR3CH:
+			m.Timer3CompareC = (m.Timer3CompareC & 0x00FF) | (uint16(value) << 8)
 		case TCCR3A:
 			m.Timer3ControlA = value
 		case TCCR3B:
@@ -439,13 +456,20 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				}
 			}
 			if value&0x02 != 0 {
-				if ioRegs[EECR]&0x04 != 0 {
+				// EEPE: EEPROM Program Enable
+				if ioRegs[EECR]&0x04 != 0 { // EEMPE: EEPROM Master Program Enable
 					addr := (uint16(ioRegs[EEARH]) << 8) | uint16(ioRegs[EEARL])
 					if addr < uint16(len(m.EEPROM)) {
 						m.EEPROM[addr] = ioRegs[EEDR]
 						_ = m.Sys.SaveEEPROM()
 					}
-					value &= ^uint8(0x06)
+					// Start the write timer (simulate 3.4ms @ 16MHz = ~54,400 cycles)
+					m.EEPROMWriteTimer = 54400
+					// Clear EEMPE bit as per datasheet (cleared by hardware after 4 cycles, but here we clear it after EEPE is set)
+					value &= ^uint8(0x04)
+				} else {
+					// EEPE is ignored if EEMPE is not set
+					value &= ^uint8(0x02)
 				}
 			}
 			ioRegs[EECR] = value
@@ -703,6 +727,22 @@ func (m *Manager) Tick(cycles uint64) {
 	m.updateWatchdog(cycles)
 	m.updateUSB(cycles)
 	m.updateSPM(cycles)
+	m.updateEEPROM(cycles)
+}
+
+func (m *Manager) updateEEPROM(cycles uint64) {
+	if m.EEPROMWriteTimer > 0 {
+		if cycles >= m.EEPROMWriteTimer {
+			m.EEPROMWriteTimer = 0
+		} else {
+			m.EEPROMWriteTimer -= cycles
+		}
+
+		if m.EEPROMWriteTimer == 0 {
+			ioRegs := m.Sys.IORegs()
+			ioRegs[EECR] &= ^uint8(0x02) // Clear EEPE (EEPROM Program Enable)
+		}
+	}
 }
 
 func (m *Manager) updateSPM(cycles uint64) {
@@ -776,11 +816,29 @@ func (m *Manager) handleEP0Setup(ioRegs []uint8) {
 	bRequest := ep0.SetupFIFO[1]
 	wValue := uint16(ep0.SetupFIFO[2]) | (uint16(ep0.SetupFIFO[3]) << 8)
 	// wIndex := uint16(ep0.SetupFIFO[4]) | (uint16(ep0.SetupFIFO[5]) << 8)
-	// wLength := uint16(ep0.SetupFIFO[6]) | (uint16(ep0.SetupFIFO[7]) << 8)
+	wLength := uint16(ep0.SetupFIFO[6]) | (uint16(ep0.SetupFIFO[7]) << 8)
 
 	// Standard Requests
 	if (bmRequestType & 0x60) == 0 {
 		switch bRequest {
+		case 0x06: // GET_DESCRIPTOR
+			descType := ep0.SetupFIFO[3]
+			switch descType {
+			case 0x01: // Device Descriptor
+				m.sendDescriptor(0, []byte{
+					18, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40,
+					0xEB, 0x03, 0x24, 0x20, 0x00, 0x01, 0x01, 0x02, 0x03, 0x01,
+				}, wLength)
+			case 0x02: // Configuration Descriptor
+				m.sendDescriptor(0, []byte{
+					9, 0x02, 34, 0, 1, 1, 0, 0xA0, 50,
+					9, 0x04, 0, 0, 1, 0x03, 0, 0, 0,
+					9, 0x21, 0x11, 0x01, 0, 1, 0x22, 47, 0,
+					7, 0x05, 0x81, 0x03, 8, 0, 10,
+				}, wLength)
+			case 0x22: // HID Report Descriptor
+				m.sendDescriptor(0, make([]byte, 47), wLength)
+			}
 		case 0x05: // SET_ADDRESS
 			m.USBAddress = uint8(wValue & 0x7F)
 			// Status Stage (In ACK)
@@ -803,6 +861,16 @@ func (m *Manager) handleEP0Setup(ioRegs []uint8) {
 
 	// Clear Setup FIFO after handling
 	ep0.SetupFIFO = ep0.SetupFIFO[8:]
+}
+
+func (m *Manager) sendDescriptor(epNum uint8, data []byte, maxLen uint16) {
+	ep := &m.USBEndpoints[epNum]
+	length := uint16(len(data))
+	if length > maxLen {
+		length = maxLen
+	}
+	ep.FIFO = append(ep.FIFO, data[:length]...)
+	ep.Interrupt |= (1 << 0) // TXINI
 }
 
 func (m *Manager) updateTimer0(cycles uint64) {
@@ -881,6 +949,18 @@ func (m *Manager) updateTimer1(cycles uint64) {
 					m.Sys.TriggerInterrupt(17)
 				}
 			}
+			if m.Timer1Counter == m.Timer1CompareB {
+				ioRegs[TIFR1] |= 1 << 2
+				if (ioRegs[TIMSK1] & (1 << 2)) != 0 {
+					m.Sys.TriggerInterrupt(18)
+				}
+			}
+			if m.Timer1Counter == m.Timer1CompareC {
+				ioRegs[TIFR1] |= 1 << 3
+				if (ioRegs[TIMSK1] & (1 << 3)) != 0 {
+					m.Sys.TriggerInterrupt(19)
+				}
+			}
 		}
 	}
 }
@@ -916,6 +996,18 @@ func (m *Manager) updateTimer3(cycles uint64) {
 				ioRegs[TIFR3] |= 1 << 1
 				if (ioRegs[TIMSK3] & (1 << 1)) != 0 {
 					m.Sys.TriggerInterrupt(32)
+				}
+			}
+			if m.Timer3Counter == m.Timer3CompareB {
+				ioRegs[TIFR3] |= 1 << 2
+				if (ioRegs[TIMSK3] & (1 << 2)) != 0 {
+					m.Sys.TriggerInterrupt(33)
+				}
+			}
+			if m.Timer3Counter == m.Timer3CompareC {
+				ioRegs[TIFR3] |= 1 << 3
+				if (ioRegs[TIMSK3] & (1 << 3)) != 0 {
+					m.Sys.TriggerInterrupt(34)
 				}
 			}
 		}

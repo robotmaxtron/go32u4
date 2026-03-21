@@ -1,6 +1,6 @@
 package bus
 
-// Bus represents the unified memory and I/O bus that connects the CPU to peripherals and memory.
+	// Bus represents the unified memory and I/O bus that connects the CPU to peripherals and memory.
 type Bus interface {
 	ReadSRAM(address uint16) uint8
 	WriteSRAM(address uint16, value uint8)
@@ -10,6 +10,7 @@ type Bus interface {
 	FlashWrite(address uint16, value uint16)
 	FlashErase(address uint16)
 	FlashCommit(address uint16)
+	SetSleep(enabled bool)
 }
 
 // IOCallback is a function that handles specialized I/O peripheral behavior.

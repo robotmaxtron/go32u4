@@ -17,6 +17,7 @@ func TestSPM(t *testing.T) {
 	
 	// Execute SPM (0x95E8)
 	m.FlashData[0] = 0x95E8
+	m.CPU.PC = 0
 	m.Step()
 
 	// Verify page is erased (all 0xFFFF)

@@ -130,9 +130,18 @@ func (m *ATmega32u4) FlashCommit(address uint16) {
 	}
 }
 
+func (m *ATmega32u4) SetSleep(enabled bool) {
+	// SLEEP instruction only takes effect if SE (Sleep Enable) bit in SMCR is set.
+	// SMCR is at IO address 0x53.
+	if m.ReadIO(0x53)&0x01 != 0 {
+		m.Periph.SleepEnabled = enabled
+		m.CPU.Halted = enabled
+	}
+}
+
 // IORegs peripherals.System implementation
 func (m *ATmega32u4) IORegs() []uint8               { return m.IORegData[:] }
-func (m *ATmega32u4) TriggerInterrupt(vector uint8) { m.PendingInterrupts |= 1 << vector }
+func (m *ATmega32u4) TriggerInterrupt(vector uint8) { m.PendingInterrupts |= 1 << uint64(vector) }
 func (m *ATmega32u4) Cycles() uint64                { return m.CPU.Cycles }
 func (m *ATmega32u4) SaveEEPROM() error {
 	if m.EEPROMFile == "" {
@@ -150,7 +159,7 @@ func (m *ATmega32u4) PinCallback(port int8, mask uint8, value uint8) {
 // SetGlobalInterrupts bus.InterruptController implementation
 func (m *ATmega32u4) SetGlobalInterrupts(enabled bool) { m.GlobalInterrupts = enabled }
 func (m *ATmega32u4) GetGlobalInterrupts() bool        { return m.GlobalInterrupts }
-func (m *ATmega32u4) ClearInterrupt(vector uint8)      { m.PendingInterrupts &= ^(1 << vector) }
+func (m *ATmega32u4) ClearInterrupt(vector uint8)      { m.PendingInterrupts &= ^(1 << uint64(vector)) }
 
 func (m *ATmega32u4) LoadEEPROM(filename string) error {
 	m.EEPROMFile = filename
@@ -166,24 +175,32 @@ func (m *ATmega32u4) LoadEEPROM(filename string) error {
 }
 
 func (m *ATmega32u4) Step() error {
-	if m.GlobalInterrupts && m.PendingInterrupts != 0 {
+	if m.PendingInterrupts != 0 {
+		// Wake up on any pending interrupt, even if global interrupts are disabled
+		// (though it won't be executed unless I flag is set)
 		m.Periph.SleepEnabled = false
+		m.CPU.Halted = false
+	}
+
+	if m.GlobalInterrupts && m.PendingInterrupts != 0 {
 		m.handleInterrupts()
 		return nil
 	}
+
 	if m.Periph.SleepEnabled {
 		m.CPU.Cycles++
 		m.Periph.Tick(1)
 		return nil
 	}
+
 	return m.CPU.Step()
 }
 
 func (m *ATmega32u4) handleInterrupts() {
 	for i := uint8(1); i < 43; i++ {
-		if (m.PendingInterrupts & (1 << i)) != 0 {
+		if (m.PendingInterrupts & (1 << uint64(i))) != 0 {
 			m.executeInterrupt(i)
-			m.PendingInterrupts &= ^(1 << i)
+			m.PendingInterrupts &= ^(1 << uint64(i))
 			break
 		}
 	}
