@@ -75,12 +75,18 @@ func (m *ATmega32u4) ReadIO(address uint16) uint8 {
 	if address == 0x3D {
 		return uint8(m.CPU.SP & 0xFF)
 	}
+	if int(address) < len(m.IORegData) {
+		// For standard registers like PORTB (0x05), read from IORegData
+		// if Periph.IOCallback doesn't provide a value.
+		// Actually, Periph.IOCallback for PORTB returns ioRegs[address] if not handled.
+	}
 	return m.Periph.IOCallback(address, 0, false)
 }
 
 func (m *ATmega32u4) WriteIO(address uint16, value uint8) {
 	if address == 0x3F {
 		m.CPU.SREG = value
+		m.GlobalInterrupts = (value & 0x80) != 0
 		return
 	}
 	if address == 0x3E {
@@ -176,8 +182,7 @@ func (m *ATmega32u4) LoadEEPROM(filename string) error {
 
 func (m *ATmega32u4) Step() error {
 	if m.PendingInterrupts != 0 {
-		// Wake up on any pending interrupt, even if global interrupts are disabled
-		// (though it won't be executed unless I flag is set)
+		// Wake up on any pending interrupt
 		m.Periph.SleepEnabled = false
 		m.CPU.Halted = false
 	}
@@ -193,24 +198,68 @@ func (m *ATmega32u4) Step() error {
 		return nil
 	}
 
-	return m.CPU.Step()
+	// Capture PC before Step to check for SPM
+	pc := m.CPU.PC
+	err := m.CPU.Step()
+	if err != nil {
+		return err
+	}
+
+	// Check if the instruction just executed was SPM (0x95E8)
+	if int(pc) < len(m.FlashData) && m.FlashData[pc] == 0x95E8 {
+		m.handleSPM()
+	}
+
+	return nil
+}
+
+func (m *ATmega32u4) handleSPM() {
+	spmcsr := m.ReadIO(0x37)
+	if (spmcsr & (1 << 0)) == 0 { // SPMEN must be set
+		return
+	}
+	z := (uint16(m.CPU.Reg[31]) << 8) | uint16(m.CPU.Reg[30])
+	if (spmcsr & (1 << 1)) != 0 { // PGERS (Page Erase)
+		pageAddr := z / 2
+		for i := uint16(0); i < 64; i++ {
+			m.FlashData[pageAddr+i] = 0xFFFF
+		}
+	} else if (spmcsr & (1 << 2)) != 0 { // PGWRT (Page Write)
+		pageAddr := z / 2
+		for i := uint16(0); i < 64; i++ {
+			m.FlashData[pageAddr+i] = m.Periph.SPMBuffer[i]
+		}
+	} else if (spmcsr & (1 << 0)) != 0 { // SPMEN set but no PGERS/PGWRT -> Buffer Fill
+		word := (uint16(m.CPU.Reg[1]) << 8) | uint16(m.CPU.Reg[0])
+		offset := (z & 0x7E) / 2
+		m.Periph.SPMBuffer[offset] = word
+	}
+	// Clear SPMEN after SPM execution
+	m.WriteIO(0x37, spmcsr&^uint8(1<<0))
 }
 
 func (m *ATmega32u4) handleInterrupts() {
+	// ATmega32u4 has vectors 1 to 42.
+	// Vector 1: RESET
+	// Vector 2: INT0
+	// Vector 43: USB Endpoint (some sources say 43, datasheet says 42 vectors total including RESET)
+	// We'll scan from 1 (excluding RESET which is vector 1)
 	for i := uint8(1); i < 43; i++ {
-		if (m.PendingInterrupts & (1 << uint64(i))) != 0 {
-			m.executeInterrupt(i)
-			m.PendingInterrupts &= ^(1 << uint64(i))
+		if (m.PendingInterrupts & (1 << i)) != 0 {
+			m.executeInterrupt(i + 1)
+			m.PendingInterrupts &= ^(1 << i)
 			break
 		}
 	}
 }
 
 func (m *ATmega32u4) executeInterrupt(vector uint8) {
+	// Vector 1 is RESET at 0x0000.
+	// Vector 2 is INT0 at 0x0002.
+	// Address = (VectorNumber - 1) * 2
 	m.CPU.Push(uint8(m.CPU.PC & 0xFF))
 	m.CPU.Push(uint8((m.CPU.PC >> 8) & 0xFF))
 	m.CPU.SetFlag(cpu.SREG_I, false)
-	m.CPU.PC = uint16(vector) * 2
-	m.CPU.Cycles += 4
-	m.Periph.Tick(4)
+	m.GlobalInterrupts = false
+	m.CPU.PC = uint16(vector-1) * 2
 }

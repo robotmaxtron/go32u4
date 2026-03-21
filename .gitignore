@@ -8,7 +8,12 @@ go32u4.exe
 *.dylib
 
 # Test and Coverage
-coverage.out
+*.out
+*.html
+*.txt
+*.md
+!README.md
+!testdata/README.md
 *.test
 *.prof
 

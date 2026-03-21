@@ -50,7 +50,8 @@ func TestSleepWakeup(t *testing.T) {
 
 	// 4. Trigger interrupt should wake up CPU
 	m.CPU.SetFlag(cpu.SREG_I, true) // Enable global interrupts
-	m.TriggerInterrupt(1) // Trigger INT0 (vector 1)
+	m.GlobalInterrupts = true
+	m.TriggerInterrupt(1) // Trigger INT0 (vector 2, bit 1)
 	
 	err = m.Step()
 	if err != nil { t.Fatal(err) }
@@ -59,12 +60,8 @@ func TestSleepWakeup(t *testing.T) {
 		t.Errorf("CPU is still sleeping after interrupt trigger")
 	}
 	
-	// PC should be at vector 1 * 2 = 2
-	// But it should have executed the instruction at 0 (the SLEEP instruction)
-	// Wait, if it wakes up it should execute the instruction AFTER sleep.
-	// In AVR, when it wakes up from an interrupt, it executes the interrupt handler
-	// and then returns to the instruction AFTER sleep.
+	// Vector 2 is at address (2-1) * 2 = 2.
 	if m.CPU.PC != 2 {
-		t.Errorf("Expected PC to be at interrupt vector 2, got %d", m.CPU.PC)
+		t.Errorf("Expected PC to be at vector 2 (2), got %d", m.CPU.PC)
 	}
 }

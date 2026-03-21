@@ -16,7 +16,7 @@ benchmarking `.hex` files.
 - **Stack Pointer**: Fully operational for all stack-related instructions.
 - **Interrupt Controller**: Full support for the interrupt vector table (43 vectors), prioritization according to ATmega32U4 datasheet, and nested interrupts.
 - **Power Management**: Support for `SLEEP` modes and wake-up cycles.
-- **SPM**: Store Program Memory (SPM) for self-programming and bootloader support.
+- **SPM**: Store Program Memory (SPM) for flash page erase, page write, and buffer fill logic.
 
 ### Peripherals Implementation
 
@@ -25,7 +25,7 @@ benchmarking `.hex` files.
 | **Interrupts**       | Implemented | Vector table handling, hardware-accurate prioritization, and execution logic.   |
 | **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR A/B/C) support.         |
 | **Timer 4**          | Implemented | 10-bit high-speed timer with PLL-based 64MHz clocking support and OCR4C as TOP. |
-| **USB Controller**   | Implemented | Register-accurate USB 2.0 endpoint management, HID descriptors (Device, Config, Report), and state machine. |
+| **USB Controller**   | Implemented | Register-accurate USB 2.0 endpoint management, HID report capture, and state machine. |
 | **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                         |
 | **EEPROM**           | Implemented | Fully functional with 3.4ms write timing simulation and disk-backed persistence.|
 | **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.        |
@@ -92,12 +92,12 @@ Current code coverage results (as of March 2026):
 
 | Package           | Statement Coverage            |
 |:------------------|:------------------------------|
-| `pkg/bus`         | 60.0% (memory interfaces)     |
-| `pkg/cpu`         | 39.5% (full ISA coverage)     |
+| `pkg/bus`         | 0.0% (interface only)         |
+| `pkg/cpu`         | 69.1% (core ISA coverage)     |
 | `pkg/loader`      | 85.0% (comprehensive parsing) |
-| `pkg/mcu`         | 64.9% (memory and interrupts) |
-| `pkg/peripherals` | 52.8% (core I/O and timers)   |
-| **Total**         | **53.1%**                     |
+| `pkg/mcu`         | 74.4% (memory and interrupts) |
+| `pkg/peripherals` | 68.7% (core I/O and timers)   |
+| **Total**         | **68.3%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -116,8 +116,8 @@ golangci-lint run ./...
 
 The simulator is optimized for speed, leveraging Go's efficient execution. Benchmarks show:
 
-- **Instruction Execution**: ~19.4 ns/op (approx. 51.6 MHz simulated speed)
-- **Overall Performance**: ~51.6 MHz (using `benchmark.go`)
+- **Instruction Execution**: ~22.0 ns/op (approx. 45.5 MHz simulated speed)
+- **Overall Performance**: ~45.5 MHz (on Apple M4)
 
 This performance exceeds the real ATmega32u4's 16 MHz clock, making it ideal for rapid firmware validation and CI pipelines.
 

@@ -30,13 +30,64 @@ func TestMCUMemoryMapping(t *testing.T) {
 	}
 }
 
+func TestReadSRAM(t *testing.T) {
+	m := mcu.NewATmega32u4()
+
+	// Registers (0-31)
+	m.CPU.Reg[0] = 0x11
+	m.CPU.Reg[15] = 0x22
+	m.CPU.Reg[31] = 0x33
+	if val := m.ReadSRAM(0); val != 0x11 {
+		t.Errorf("ReadSRAM(0) = %02X, expected 0x11", val)
+	}
+	if val := m.ReadSRAM(15); val != 0x22 {
+		t.Errorf("ReadSRAM(15) = %02X, expected 0x22", val)
+	}
+	if val := m.ReadSRAM(31); val != 0x33 {
+		t.Errorf("ReadSRAM(31) = %02X, expected 0x33", val)
+	}
+
+	// IO Mapping (32 to 32+255)
+	// SREG is at IO 0x3F (32 + 0x3F = 95)
+	m.CPU.SREG = 0x55
+	if val := m.ReadSRAM(95); val != 0x55 {
+		t.Errorf("ReadSRAM(95) = %02X, expected 0x55 (SREG)", val)
+	}
+	// Other IO register via Periph
+	// TWDR is 0xBB (IO)
+	m.WriteIO(0xBB, 0x44)
+	if val := m.ReadSRAM(32+0xBB); val != 0x44 {
+		t.Errorf("ReadSRAM(32+0xBB) = %02X, expected 0x44", val)
+	}
+
+	// SRAM Mapping (starts at 32 + 256 = 288)
+	m.SRAMData[0] = 0xAA
+	m.SRAMData[100] = 0xBB
+	m.SRAMData[len(m.SRAMData)-1] = 0xCC
+	if val := m.ReadSRAM(288); val != 0xAA {
+		t.Errorf("ReadSRAM(288) = %02X, expected 0xAA", val)
+	}
+	if val := m.ReadSRAM(288+100); val != 0xBB {
+		t.Errorf("ReadSRAM(388) = %02X, expected 0xBB", val)
+	}
+	if val := m.ReadSRAM(288+uint16(len(m.SRAMData))-1); val != 0xCC {
+		t.Errorf("ReadSRAM(end) = %02X, expected 0xCC", val)
+	}
+
+	// Out of bounds
+	if val := m.ReadSRAM(0xFFFF); val != 0 {
+		t.Errorf("ReadSRAM(0xFFFF) = %02X, expected 0", val)
+	}
+}
+
 func TestMCUInterrupts(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	m.GlobalInterrupts = true
-	m.PendingInterrupts = 1 << 1 // INT0
+	// We use INT0 (Vector 2, index 1)
+	m.PendingInterrupts = 1 << 1
 
 	_ = m.Step()
-	// Should have executed interrupt 1: PC = 1 * 2 = 2
+	// Vector 2: Address (2-1) * 2 = 2
 	if m.CPU.PC != 2 {
 		t.Errorf("Expected PC 2 after interrupt, got %d", m.CPU.PC)
 	}

@@ -74,7 +74,7 @@ func TestTWIState(t *testing.T) {
 	}
 
 	// Write Address
-	sys.ioRegs[peripherals.TWDR] = 0x20                 // Slave 0x10, write
+	sys.ioRegs[peripherals.TWDR] = 0x20 << 1             // Slave 0x20, write
 	p.IOCallback(peripherals.TWCR, (1<<7)|(1<<2), true) // TWINT, TWEN (trigger state update)
 
 	if p.TWIState != 0x18 {

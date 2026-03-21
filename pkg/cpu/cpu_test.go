@@ -59,6 +59,7 @@ func TestTimer0Overflow(t *testing.T) {
 	m.WriteIO(peripherals.TCCR0B, 1) // Prescaler 1
 	m.WriteIO(peripherals.TIMSK0, 1) // TOIE0
 	m.CPU.SetFlag(cpu.SREG_I, true)
+	m.GlobalInterrupts = true
 
 	m.Periph.Timer0Counter = 255
 	m.FlashData[0] = 0x0000 // NOP
@@ -68,13 +69,14 @@ func TestTimer0Overflow(t *testing.T) {
 	if m.Periph.Timer0Counter != 0 {
 		t.Errorf("Expected Timer0 0, got %d", m.Periph.Timer0Counter)
 	}
-	// Interrupt should be pending
+	// Interrupt should be pending (vector 24 is index 23)
 	if (m.PendingInterrupts & (1 << 23)) == 0 {
-		t.Errorf("Expected Timer0 Overflow interrupt pending")
+		t.Errorf("Expected Timer0 Overflow interrupt pending, got %b", m.PendingInterrupts)
 	}
 
 	// Next step should execute interrupt
 	_ = m.Step()
+	// ATmega32u4 Timer0 Overflow vector is 24 (address (24-1)*2 = 46)
 	if m.CPU.PC != 23*2 {
 		t.Errorf("Expected PC %d, got %d", 23*2, m.CPU.PC)
 	}

@@ -286,7 +286,8 @@ type Manager struct {
 	USBConfigured  bool
 
 	// HID State
-	HIDKeyMap [8]uint8 // Simple keymap for emulation
+	HIDKeyMap           [8]uint8 // Simple keymap for emulation
+	CapturedHIDReports  [][]byte // Reports sent by the firmware
 
 	// SPM State
 	SPMBuffer   [64]uint16
@@ -521,9 +522,21 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			ioRegs[address] = value
 		case UEINTX:
 			if m.USBSelectedEP < 7 {
+				ep := &m.USBEndpoints[m.USBSelectedEP]
+				// Check if TXINI is being cleared (bit 0)
+				// Clearing TXINI in hardware means the FIFO is ready to be sent.
+				if (ep.Interrupt & 0x01) != 0 && (value & 0x01) == 0 {
+					// Capture the report if it's on a HID endpoint (assume EP1 for now, or any non-EP0)
+					if m.USBSelectedEP != 0 && len(ep.FIFO) > 0 {
+						report := make([]byte, len(ep.FIFO))
+						copy(report, ep.FIFO)
+						m.CapturedHIDReports = append(m.CapturedHIDReports, report)
+						ep.FIFO = nil // Clear FIFO after "sending"
+					}
+				}
 				// Clear flags by writing 0 as per datasheet
-				m.USBEndpoints[m.USBSelectedEP].Interrupt &= value
-				ioRegs[UEINTX] = m.USBEndpoints[m.USBSelectedEP].Interrupt
+				ep.Interrupt &= value
+				ioRegs[UEINTX] = ep.Interrupt
 			}
 		case UECFG0X:
 			if m.USBSelectedEP < 7 {
@@ -584,6 +597,12 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			// SPMEN is automatically cleared after 4 cycles if not used by SPM instruction.
 			if (value & (1 << SPMEN)) != 0 {
 				m.SPMTimeout = 4
+				// Handle flash operations if triggered by setting PGERS or PGWRT along with SPMEN
+				// (In actual hardware it's triggered by the SPM instruction, but we can also
+				// check here for convenience if the instruction implementation is simple)
+				// Actually, we should only do it on the SPM instruction.
+				// But we need to capture Z pointer. The Manager doesn't have Z pointer.
+				// The ATmega32u4 WriteIO will call us.
 			}
 			ioRegs[address] = value
 		case WDTCSR:
@@ -1110,29 +1129,48 @@ func (m *Manager) updateTWIState(ioRegs []uint8) {
 		} else {
 			m.MCP23018_Active = false
 			if sla&0x01 == 0 {
-				m.TWIState = 0x18
+				m.TWIState = 0x20 // SLA+W NACK
 			} else {
-				m.TWIState = 0x40
+				m.TWIState = 0x48 // SLA+R NACK
 			}
 		}
 	case 0x18: // SLA+W ACK
 		if m.MCP23018_Active {
 			m.MCP23018_Selected = ioRegs[TWDR]
+			m.TWIState = 0x28 // Data ACK
+		} else {
+			m.TWIState = 0x20 // Should not happen if addr check is correct, but for safety
 		}
-		m.TWIState = 0x28 // Data ACK
+	case 0x20: // SLA+W NACK
+		m.TWIState = 0xF8
 	case 0x28: // Data ACK (Write)
 		if m.MCP23018_Active {
 			reg := m.getMCP23018RegAddr(m.MCP23018_Selected)
 			val := ioRegs[TWDR]
 			if reg < 0x16 {
-				m.MCP23018_Regs[reg] = val
+				// Some registers are read-only or have read-only bits
+				if reg == MCP23018_INTFA || reg == MCP23018_INTFB ||
+					reg == MCP23018_INTCAPA || reg == MCP23018_INTCAPB ||
+					reg == MCP23018_GPIOA || reg == MCP23018_GPIOB {
+					// Read-only
+				} else {
+					m.MCP23018_Regs[reg] = val
+				}
 				// Auto-increment register address
-				m.MCP23018_Selected++
+				if m.MCP23018_Selected < 0xFF {
+					m.MCP23018_Selected++
+				}
 			}
 		}
 		m.TWIState = 0x28
 	case 0x40: // SLA+R ACK
-		m.TWIState = 0x50 // Data ACK
+		if m.MCP23018_Active {
+			m.TWIState = 0x50 // Data ACK
+		} else {
+			m.TWIState = 0x48
+		}
+	case 0x48: // SLA+R NACK
+		m.TWIState = 0xF8
 	case 0x50: // Data ACK (Read)
 		if m.MCP23018_Active {
 			m.MCP23018_Selected++
@@ -1223,6 +1261,15 @@ func (m *Manager) prepareMCP23018Read(ioRegs []uint8) {
 
 		// Update INTF and INTCAP if logic 0 detected on interrupt-enabled pin
 		// For ErgoDox, often interrupt-on-change is used.
+		// Apply IPOL (Input Polarity)
+		var ipol uint8
+		if reg == MCP23018_GPIOA {
+			ipol = m.MCP23018_Regs[MCP23018_IPOLA]
+		} else {
+			ipol = m.MCP23018_Regs[MCP23018_IPOLB]
+		}
+		res ^= ipol
+
 		// This is a simplified interrupt logic:
 		oldGPIO := m.MCP23018_Regs[reg]
 		changed := oldGPIO ^ res
