@@ -169,7 +169,7 @@ const (
 	// Watchdog Registers
 	WDTCSR = 0x60 // Watchdog Timer Control Register
 
- // Watchdog Timer Bits
+	// Watchdog Timer Bits
 	WDP0 = 0
 	WDP1 = 1
 	WDP2 = 2
@@ -274,8 +274,8 @@ type Manager struct {
 	USBConfigured  bool
 
 	// HID State
-	HIDKeyMap           [8]uint8 // Simple keymap for emulation
-	CapturedHIDReports  [][]byte // Reports sent by the firmware
+	HIDKeyMap          [8]uint8 // Simple keymap for emulation
+	CapturedHIDReports [][]byte // Reports sent by the firmware
 
 	// SPM State
 	SPMBuffer   [64]uint16
@@ -321,7 +321,7 @@ type Manager struct {
 type TWIClient interface {
 	Address() uint8
 	OnStart(isRead bool) bool // Returns ACK/NACK
-	OnWrite(data uint8) bool   // Returns ACK/NACK
+	OnWrite(data uint8) bool  // Returns ACK/NACK
 	OnRead() uint8            // Returns data byte
 	OnStop()
 }
@@ -524,7 +524,7 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				ep := &m.USBEndpoints[m.USBSelectedEP]
 				// Check if TXINI is being cleared (bit 0)
 				// Clearing TXINI in hardware means the FIFO is ready to be sent.
-				if (ep.Interrupt & 0x01) != 0 && (value & 0x01) == 0 {
+				if (ep.Interrupt&0x01) != 0 && (value&0x01) == 0 {
 					// Capture the report if it's on a HID endpoint (assume EP1 for now, or any non-EP0)
 					if m.USBSelectedEP != 0 && len(ep.FIFO) > 0 {
 						report := make([]byte, len(ep.FIFO))
@@ -743,7 +743,7 @@ func (m *Manager) Tick(cycles uint64) {
 	m.updateTimer3(cycles)
 	m.updateTimer4(cycles)
 	m.updateWatchdog(cycles)
-	m.updateUSB(cycles)
+	m.updateUSB()
 	m.updateSPM(cycles)
 	m.updateEEPROM(cycles)
 	m.updateMacro(cycles)
@@ -804,7 +804,7 @@ func (m *Manager) updateSPM(cycles uint64) {
 	}
 }
 
-func (m *Manager) updateUSB(cycles uint64) {
+func (m *Manager) updateUSB() {
 	ioRegs := m.Sys.IORegs()
 
 	// Handle USB Reset
@@ -816,7 +816,7 @@ func (m *Manager) updateUSB(cycles uint64) {
 	// Simple HID injection (emulate keys being pressed)
 	if m.USBConfigured {
 		// Example: In a real implementation, we would check for HID events here.
-		// For now, we just ensure that if HIDKeyMap is updated externally, 
+		// For now, we just ensure that if HIDKeyMap is updated externally,
 		// the data can be moved into endpoint FIFOs.
 		hidEP := &m.USBEndpoints[1] // Assume EP1 is HID IN
 		if len(hidEP.FIFO) == 0 && m.HIDKeyMap[0] != 0 {
@@ -834,7 +834,7 @@ func (m *Manager) updateUSB(cycles uint64) {
 		}
 		// Trigger USB General interrupt
 		m.Sys.TriggerInterrupt(10)
-		m.handleEP0Setup(ioRegs)
+		m.handleEP0Setup()
 	}
 
 	// Basic endpoint interrupt handling
@@ -851,7 +851,7 @@ func (m *Manager) updateUSB(cycles uint64) {
 	}
 }
 
-func (m *Manager) handleEP0Setup(ioRegs []uint8) {
+func (m *Manager) handleEP0Setup() {
 	ep0 := &m.USBEndpoints[0]
 	if len(ep0.SetupFIFO) < 8 {
 		return
@@ -863,7 +863,8 @@ func (m *Manager) handleEP0Setup(ioRegs []uint8) {
 	wLength := uint16(ep0.SetupFIFO[6]) | (uint16(ep0.SetupFIFO[7]) << 8)
 
 	// Standard Requests
-	if (bmRequestType & 0x60) == 0 {
+	switch bmRequestType & 0x60 {
+	case 0:
 		switch bRequest {
 		case 0x06: // GET_DESCRIPTOR
 			descType := ep0.SetupFIFO[3]
@@ -891,7 +892,7 @@ func (m *Manager) handleEP0Setup(ioRegs []uint8) {
 			m.USBConfigured = (wValue != 0)
 			ep0.Interrupt |= (1 << 0) // TXINI
 		}
-	} else if (bmRequestType & 0x60) == 0x20 { // Class-Specific Requests
+	case 0x20: // Class-Specific Requests
 		// Handle HID-specific requests
 		switch bRequest {
 		case 0x01: // GET_REPORT

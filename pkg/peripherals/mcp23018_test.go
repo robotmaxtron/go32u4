@@ -37,7 +37,7 @@ func TestMCP23018_BasicReadWrite(t *testing.T) {
 
 	// 1. Start I2C (SLA+W)
 	m.TWIState = 0x08 // START transmitted
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	if m.TWIState != 0x18 {
 		t.Errorf("Expected TWIState 0x18 (SLA+W ACK), got 0x%02X", m.TWIState)
@@ -77,7 +77,7 @@ func TestMCP23018_BankSwitching(t *testing.T) {
 	// 1. Write IOCON.BANK = 1
 	// SLA+W
 	m.TWIState = 0x08
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	// Select IOCON
 	ioRegs[TWDR] = MCP23018_IOCON
@@ -95,7 +95,7 @@ func TestMCP23018_BankSwitching(t *testing.T) {
 	// 2. Test Bank 1 Mapping
 	// Write to selected 0x01 in Bank 1
 	m.TWIState = 0x08
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	ioRegs[TWDR] = 0x01
 	m.updateTWI(ioRegs) // MCP23018_Selected = 0x01
@@ -109,7 +109,7 @@ func TestMCP23018_BankSwitching(t *testing.T) {
 	// Write to selected 0x11 in Bank 1
 	mcp.OnStop() // Reset selected for next transaction
 	m.TWIState = 0x08
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	ioRegs[TWDR] = 0x11
 	m.updateTWI(ioRegs)
@@ -262,7 +262,7 @@ func TestMCP23018_I2C_ErrorStates(t *testing.T) {
 	// 1. Invalid Address SLA+W
 	m.TWIState = 0x08 // START transmitted
 	invalidAddr := mcp.addr + 1
-	ioRegs[TWDR] = (invalidAddr << 1) | 0
+	ioRegs[TWDR] = invalidAddr << 1
 	m.updateTWI(ioRegs)
 	if m.TWIState != 0x20 {
 		t.Errorf("Expected TWIState 0x20 (SLA+W NACK), got 0x%02X", m.TWIState)
@@ -279,7 +279,7 @@ func TestMCP23018_I2C_ErrorStates(t *testing.T) {
 	// 3. No Pull-Up Resistor
 	m.PullUpResistor = 1000001.0 // Above 1M threshold
 	m.TWIState = 0x08
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	if m.TWIState != 0xF8 {
 		t.Errorf("Expected TWIState 0xF8 (No Pull-Up Error), got 0x%02X", m.TWIState)
@@ -287,7 +287,7 @@ func TestMCP23018_I2C_ErrorStates(t *testing.T) {
 
 	// 4. Write to Read-Only Register (INTFA)
 	m.TWIState = 0x08
-	ioRegs[TWDR] = (mcp.addr << 1) | 0
+	ioRegs[TWDR] = mcp.addr << 1
 	m.updateTWI(ioRegs)
 	ioRegs[TWDR] = MCP23018_INTFA
 	m.updateTWI(ioRegs)

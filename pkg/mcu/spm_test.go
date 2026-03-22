@@ -18,7 +18,7 @@ func TestSPM(t *testing.T) {
 	// Execute SPM (0x95E8)
 	m.FlashData[0] = 0x95E8
 	m.CPU.PC = 0
-	m.Step()
+	_ = m.Step()
 
 	// Verify page is erased (all 0xFFFF)
 	for i := 0x800; i < 0x840; i++ {
@@ -35,7 +35,7 @@ func TestSPM(t *testing.T) {
 	m.CPU.Reg[31] = 0x10
 	m.WriteIO(0x37, 0x01) // SPMEN
 	m.CPU.PC = 0
-	m.Step()
+	_ = m.Step()
 	if m.Periph.SPMBuffer[0] != 0x1234 {
 		t.Errorf("SPMBuffer[0] expected 0x1234, got %04X", m.Periph.SPMBuffer[0])
 	}
@@ -47,7 +47,7 @@ func TestSPM(t *testing.T) {
 	m.CPU.Reg[31] = 0x10
 	m.WriteIO(0x37, 0x01) // SPMEN
 	m.CPU.PC = 0
-	m.Step()
+	_ = m.Step()
 	if m.Periph.SPMBuffer[1] != 0x5678 {
 		t.Errorf("SPMBuffer[1] expected 0x5678, got %04X", m.Periph.SPMBuffer[1])
 	}
@@ -57,7 +57,7 @@ func TestSPM(t *testing.T) {
 	m.CPU.Reg[31] = 0x10
 	m.WriteIO(0x37, 0x05) // PGWRT | SPMEN
 	m.CPU.PC = 0
-	m.Step()
+	_ = m.Step()
 
 	// Verify flash content
 	if m.FlashData[0x800] != 0x1234 {

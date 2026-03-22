@@ -75,11 +75,8 @@ func (m *ATmega32u4) ReadIO(address uint16) uint8 {
 	if address == 0x3D {
 		return uint8(m.CPU.SP & 0xFF)
 	}
-	if int(address) < len(m.IORegData) {
-		// For standard registers like PORTB (0x05), read from IORegData
-		// if Periph.IOCallback doesn't provide a value.
-		// Actually, Periph.IOCallback for PORTB returns ioRegs[address] if not handled.
-	}
+	// Handle standard registers like PORTB (0x05)
+	// through Periph.IOCallback, which returns ioRegs[address] if not handled.
 	return m.Periph.IOCallback(address, 0, false)
 }
 

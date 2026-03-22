@@ -20,22 +20,22 @@ func TestComplexMacroSimulation(t *testing.T) {
 	// SLA+W for MCP23018 (0x20)
 	m.WriteIO(peripherals.TWDR, 0x20<<1)
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2)|(1<<5)) // START
-	m.Step()
+	_ = m.Step()
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2)) // SLA+W
-	m.Step()
+	_ = m.Step()
 
 	// Set IODIRA = 0x00 (outputs), IODIRB = 0xFF (inputs)
 	m.WriteIO(peripherals.TWDR, 0x00) // Reg addr IODIRA
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2))
-	m.Step()
+	_ = m.Step()
 	m.WriteIO(peripherals.TWDR, 0x00) // Value for IODIRA
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2))
-	m.Step()
+	_ = m.Step()
 	m.WriteIO(peripherals.TWDR, 0xFF) // Value for IODIRB
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2))
-	m.Step()
+	_ = m.Step()
 	m.WriteIO(peripherals.TWCR, (1<<7)|(1<<2)|(1<<4)) // STOP
-	m.Step()
+	_ = m.Step()
 
 	// 2. Simulate the Macro Trigger (Key Press)
 	// User presses Row 0, Col 0.

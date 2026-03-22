@@ -13,7 +13,7 @@ func TestEEPROMPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	eepromFile := filepath.Join(tmpDir, "eeprom.bin")
 	m := mcu.NewATmega32u4()
@@ -78,7 +78,7 @@ func TestLoadEEPROMError(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	// Try to load a directory as a file to trigger an error
 	tmpDir, _ := os.MkdirTemp("", "eeprom_err")
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 	
 	err := m.LoadEEPROM(tmpDir)
 	if err == nil {

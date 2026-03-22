@@ -36,10 +36,10 @@ func (c *CPU) Execute(opcode uint16) int {
 	skip := false
 	if (opcode & 0xFF00) == 0x9900 { // SBIC (1001 1001 AAAA Abbb)
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
-		if (c.Bus.ReadIO(uint16(port)) & (1 << bit)) == 0 { skip = true }
+		if (c.Bus.ReadIO(port) & (1 << bit)) == 0 { skip = true }
 	} else if (opcode & 0xFF00) == 0x9B00 { // SBIS (1001 1011 AAAA Abbb)
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
-		if (c.Bus.ReadIO(uint16(port)) & (1 << bit)) != 0 { skip = true }
+		if (c.Bus.ReadIO(port) & (1 << bit)) != 0 { skip = true }
 	} else if (opcode & 0xFE08) == 0xFC00 { // SBRC (1111 110r rrrr 0bbb)
 		r, bit := (opcode>>4)&0x1F, uint8(opcode&0x07)
 		if (c.Reg[r] & (1 << bit)) == 0 { skip = true }
@@ -64,13 +64,13 @@ func (c *CPU) Execute(opcode uint16) int {
 	// 4. I/O Bit
 	if (opcode & 0xFE08) == 0x9A00 { // SBI
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
-		val := c.Bus.ReadIO(uint16(port)) | (1 << bit)
-		c.Bus.WriteIO(uint16(port), val); return 1
+		val := c.Bus.ReadIO(port) | (1 << bit)
+		c.Bus.WriteIO(port, val); return 1
 	}
 	if (opcode & 0xFE08) == 0x9800 { // CBI
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
-		val := c.Bus.ReadIO(uint16(port)) & ^(1 << bit)
-		c.Bus.WriteIO(uint16(port), val); return 1
+		val := c.Bus.ReadIO(port) & ^(1 << bit)
+		c.Bus.WriteIO(port, val); return 1
 	}
 
 	// 5. ALU Immediates
