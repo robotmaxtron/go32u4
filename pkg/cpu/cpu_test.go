@@ -18,6 +18,14 @@ func TestCPUInitialization(t *testing.T) {
 	}
 }
 
+func TestCPUWriteSRAM(t *testing.T) {
+	m := mcu.NewATmega32u4()
+	m.CPU.WriteSRAM(0x0200, 0x42)
+	if val := m.CPU.ReadSRAM(0x0200); val != 0x42 {
+		t.Errorf("Expected 0x42, got %02X", val)
+	}
+}
+
 func TestLDI(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	m.FlashData[0] = 0xE00F // LDI R16, 0x0F

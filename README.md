@@ -32,6 +32,7 @@ benchmarking `.hex` files.
 | **MCP23018**         | Implemented | Full emulation of I2C I/O expander with banked registers and pin logic.         |
 | **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                |
 | **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.        |
+| **Macro Execution**  | Implemented | Sequence-based HID report generation for complex macros with delay support.     |
 | **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register (PRR) support.                 |
 
 ## Known Gaps & Missing Features
@@ -93,11 +94,11 @@ Current code coverage results (as of March 2026):
 | Package           | Statement Coverage            |
 |:------------------|:------------------------------|
 | `pkg/bus`         | 0.0% (interface only)         |
-| `pkg/cpu`         | 69.1% (core ISA coverage)     |
+| `pkg/cpu`         | 78.8% (core ISA coverage)     |
 | `pkg/loader`      | 85.0% (comprehensive parsing) |
-| `pkg/mcu`         | 74.4% (memory and interrupts) |
-| `pkg/peripherals` | 68.7% (core I/O and timers)   |
-| **Total**         | **68.3%**                     |
+| `pkg/mcu`         | 91.7% (memory and interrupts) |
+| `pkg/peripherals` | 82.5% (core I/O and timers)   |
+| **Total**         | **78.8%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -116,8 +117,8 @@ golangci-lint run ./...
 
 The simulator is optimized for speed, leveraging Go's efficient execution. Benchmarks show:
 
-- **Instruction Execution**: ~22.0 ns/op (approx. 45.5 MHz simulated speed)
-- **Overall Performance**: ~45.5 MHz (on Apple M4)
+- **Instruction Execution**: ~23.2 ns/op (approx. 43.1 MHz simulated speed)
+- **Overall Performance**: ~43.1 MHz (on Apple M4)
 
 This performance exceeds the real ATmega32u4's 16 MHz clock, making it ideal for rapid firmware validation and CI pipelines.
 

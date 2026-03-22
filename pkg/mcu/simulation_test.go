@@ -8,6 +8,8 @@ import (
 
 func TestComplexMacroSimulation(t *testing.T) {
 	m := mcu.NewATmega32u4()
+	mcp := peripherals.NewMCP23018(0x20, m.Periph)
+	m.Periph.RegisterTWIClient(mcp)
 
 	// 1. Setup the environment
 	// We'll simulate an ErgoDox-like matrix where Row 0, Col 0 is a macro key.
@@ -38,7 +40,7 @@ func TestComplexMacroSimulation(t *testing.T) {
 	// 2. Simulate the Macro Trigger (Key Press)
 	// User presses Row 0, Col 0.
 	// We'll assume the firmware scans by setting PA0 low and reading PB0.
-	m.Periph.MCP23018_External = 0xFEFE // Both PA0 and PB0 go low when connected and PA0 is driven low.
+	mcp.External = 0xFEFE // Both PA0 and PB0 go low when connected and PA0 is driven low.
 
 	// 3. Mock the firmware loop (Simplified)
 	// Instead of running a real hex (which we don't have a full QMK-like one for),

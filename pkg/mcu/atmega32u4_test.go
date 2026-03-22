@@ -80,6 +80,88 @@ func TestReadSRAM(t *testing.T) {
 	}
 }
 
+func TestMCUFlashOperations(t *testing.T) {
+	m := mcu.NewATmega32u4()
+
+	// FlashWrite (Standard)
+	m.FlashWrite(10, 0x1234)
+	if m.FlashData[10] != 0x1234 {
+		t.Errorf("Expected FlashData[10] 0x1234, got %04X", m.FlashData[10])
+	}
+
+	// FlashWrite (SPM Buffer)
+	// SPMCSR at 0x37. SPMEN is bit 0.
+	m.WriteIO(0x37, 0x01)
+	m.FlashWrite(10, 0x5678)
+	if m.Periph.SPMBuffer[10%64] != 0x5678 {
+		t.Errorf("Expected SPMBuffer[10] 0x5678, got %04X", m.Periph.SPMBuffer[10%64])
+	}
+	// Verify it didn't overwrite flash directly
+	if m.FlashData[10] != 0x1234 {
+		t.Errorf("Expected FlashData[10] still 0x1234, got %04X", m.FlashData[10])
+	}
+
+	// FlashErase
+	m.FlashWrite(64, 0xAAAA)
+	m.FlashWrite(65, 0xBBBB)
+	m.FlashErase(64) // Erases page starting at 64
+	if m.FlashData[64] != 0xFFFF || m.FlashData[127] != 0xFFFF {
+		t.Errorf("Expected FlashData[64] and [127] 0xFFFF after erase, got %04X, %04X", m.FlashData[64], m.FlashData[127])
+	}
+
+	// FlashCommit
+	for i := uint16(0); i < 64; i++ {
+		m.Periph.SPMBuffer[i] = i
+	}
+	m.FlashCommit(128) // Commits to page starting at 128
+	if m.FlashData[128] != 0 || m.FlashData[128+63] != 63 {
+		t.Errorf("Expected FlashData[128] 0 and [191] 63 after commit, got %04X, %04X", m.FlashData[128], m.FlashData[191])
+	}
+}
+
+func TestMCUOther(t *testing.T) {
+	m := mcu.NewATmega32u4()
+
+	// Cycles
+	m.CPU.Cycles = 12345
+	if m.Cycles() != 12345 {
+		t.Errorf("Expected Cycles() 12345, got %d", m.Cycles())
+	}
+
+	// Global Interrupts
+	m.SetGlobalInterrupts(true)
+	if !m.GetGlobalInterrupts() {
+		t.Error("Expected GlobalInterrupts to be true")
+	}
+	m.SetGlobalInterrupts(false)
+	if m.GetGlobalInterrupts() {
+		t.Error("Expected GlobalInterrupts to be false")
+	}
+
+	// Clear Interrupt
+	m.TriggerInterrupt(5)
+	if (m.PendingInterrupts & (1 << 5)) == 0 {
+		t.Error("Expected bit 5 to be set in PendingInterrupts")
+	}
+	m.ClearInterrupt(5)
+	if (m.PendingInterrupts & (1 << 5)) != 0 {
+		t.Error("Expected bit 5 to be cleared in PendingInterrupts")
+	}
+
+	// PinCallback
+	called := false
+	m.PinCallbackFunc = func(port int8, mask uint8, value uint8) {
+		called = true
+		if port != 1 || mask != 0x01 || value != 0x01 {
+			t.Errorf("PinCallback unexpected args: %d, %02X, %02X", port, mask, value)
+		}
+	}
+	m.PinCallback(1, 0x01, 0x01)
+	if !called {
+		t.Error("Expected PinCallbackFunc to be called")
+	}
+}
+
 func TestMCUInterrupts(t *testing.T) {
 	m := mcu.NewATmega32u4()
 	m.GlobalInterrupts = true

@@ -16,6 +16,7 @@ go32u4.exe
 !testdata/README.md
 *.test
 *.prof
+*.func
 
 # IDEs
 .idea/
