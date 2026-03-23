@@ -5,29 +5,31 @@ func (c *CPU) Execute(opcode uint16) int {
 
 	// 1. MUL (1001 11rd dddd rrrr)
 	if (opcode & 0xFC00) == 0x9C00 {
-		d := (opcode >> 4) & 0x001F
-		r := (opcode & 0x000F) | ((opcode >> 5) & 0x0010)
+		d := (opcode >> 4) & 0x1F
+		r := (opcode & 0x0F) | ((opcode >> 5) & 0x10)
 		res := uint16(c.Reg[d]) * uint16(c.Reg[r])
 		c.Reg[0], c.Reg[1] = uint8(res), uint8(res>>8)
 		c.SetFlag(SREG_Z, res == 0); c.SetFlag(SREG_C, (res&0x8000) != 0)
-		return 1
+		return 2
 	}
 
 	// 2. CPSE (0001 00rd dddd rrrr)
 	if (opcode & 0xFC00) == 0x1000 {
-		d := (opcode >> 4) & 0x001F
-		r := (opcode & 0x000F) | ((opcode >> 5) & 0x0010)
+		d := (opcode >> 4) & 0x1F
+		r := (opcode & 0x0F) | ((opcode >> 5) & 0x10)
 		if c.Reg[d] == c.Reg[r] {
+			cycles := 2
 			if int(c.PC) < len(flash) {
 				nextOp := flash[c.PC]
-				c.PC++ // Skip next instruction
-				// Check for 2-word instructions: LDS, STS, CALL, JMP
+				c.PC++
 				if (nextOp&0xFE0F) == 0x9000 || (nextOp&0xFE0F) == 0x9200 || (nextOp&0xFE0E) == 0x940E || (nextOp&0xFE0E) == 0x940C {
 					if int(c.PC) < len(flash) {
 						c.PC++
+						cycles = 3
 					}
 				}
 			}
+			return cycles
 		}
 		return 1
 	}
@@ -49,28 +51,31 @@ func (c *CPU) Execute(opcode uint16) int {
 	}
 
 	if skip {
+		cycles := 2
 		if int(c.PC) < len(flash) {
 			nextOp := flash[c.PC]
 			c.PC++
-			// Check for 2-word instructions
+			// Skip 2-word instructions: JMP, CALL, LDS, STS
 			if (nextOp&0xFE0F) == 0x9000 || (nextOp&0xFE0F) == 0x9200 || (nextOp&0xFE0E) == 0x940E || (nextOp&0xFE0E) == 0x940C {
 				if int(c.PC) < len(flash) {
 					c.PC++
+					cycles = 3
 				}
 			}
 		}
+		return cycles
 	}
 
 	// 4. I/O Bit
-	if (opcode & 0xFE08) == 0x9A00 { // SBI
+	if (opcode & 0xFF00) == 0x9A00 { // SBI (1001 1010 AAAA Abbb)
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
 		val := c.Bus.ReadIO(port) | (1 << bit)
-		c.Bus.WriteIO(port, val); return 1
+		c.Bus.WriteIO(port, val); return 2
 	}
-	if (opcode & 0xFE08) == 0x9800 { // CBI
+	if (opcode & 0xFF00) == 0x9800 { // CBI (1001 1000 AAAA Abbb)
 		port, bit := (opcode>>3)&0x1F, uint8(opcode&0x07)
 		val := c.Bus.ReadIO(port) & ^(1 << bit)
-		c.Bus.WriteIO(port, val); return 1
+		c.Bus.WriteIO(port, val); return 2
 	}
 
 	// 5. ALU Immediates
@@ -95,12 +100,23 @@ func (c *CPU) Execute(opcode uint16) int {
 	// 8. Data Transfer
 	if (opcode&0xFE0F) == 0x9000 { d,k := (opcode>>4)&0x1F, flash[c.PC]; c.PC++; c.Reg[d] = c.Bus.ReadSRAM(k); return 2 }
 	if (opcode&0xFE0F) == 0x9200 { r,k := (opcode>>4)&0x1F, flash[c.PC]; c.PC++; c.Bus.WriteSRAM(k, c.Reg[r]); return 2 }
-	if (opcode&0xFE0E) == 0x940E { k1,k2,k3 := (opcode>>4)&0x1F, opcode&0x01, flash[c.PC]; c.PC++; target := (uint32(k1)<<17)|(uint32(k2)<<16)|uint32(k3); c.Push(uint8(c.PC)); c.Push(uint8(c.PC>>8)); c.PC = uint16(target); return 4 }
+	if (opcode&0xFE0E) == 0x940E { _,k2,k3 := (opcode>>4)&0x1F, opcode&0x01, flash[c.PC]; c.PC++; target := (uint32(k2)<<16)|uint32(k3); c.Push(uint8(c.PC >> 8)); c.Push(uint8(c.PC & 0xFF)); c.PC = uint16(target); return 4 }
+	if (opcode&0xFE0E) == 0x940C { _,k2,k3 := (opcode>>4)&0x1F, opcode&0x01, flash[c.PC]; c.PC++; target := (uint32(k2)<<16)|uint32(k3); c.PC = uint16(target); return 3 }
 	if (opcode&0xFE0F) == 0x920F { c.Push(c.Reg[(opcode>>4)&0x1F]); return 2 }
 	if (opcode&0xFE0F) == 0x900F { c.Reg[(opcode>>4)&0x1F] = c.Pop(); return 2 }
 
-	if (opcode&0xF800) == 0xB800 { c.Bus.WriteIO((opcode&0x0F)|((opcode>>5)&0x30), c.Reg[(opcode>>4)&0x1F]); return 1 }
-	if (opcode&0xF800) == 0xB000 { c.Reg[(opcode>>4)&0x1F] = c.Bus.ReadIO((opcode&0x0F)|((opcode>>5)&0x30)); return 1 }
+	// IN / OUT (6-bit address)
+	// IN Rd, A: 1011 0AAd dddd AAAA -> A is opcode[10:9] and opcode[3:0]
+	if (opcode&0xF000) == 0xB000 {
+		d_r := (opcode >> 4) & 0x1F
+		A := (opcode & 0x000F) | ((opcode & 0x0600) >> 5)
+		if (opcode & 0x0800) != 0 { // OUT A, Rr
+			c.Bus.WriteIO(A, c.Reg[d_r])
+		} else { // IN Rd, A
+			c.Reg[d_r] = c.Bus.ReadIO(A)
+		}
+		return 1
+	}
 
 	if (opcode & 0xFE08) == 0xFA00 { r, b := (opcode>>4)&0x1F, uint8(opcode&0x07); c.SetFlag(SREG_T, (c.Reg[r]&(1<<b)) != 0); return 1 }
 	if (opcode & 0xFE08) == 0xF800 { d, b := (opcode>>4)&0x1F, uint8(opcode&0x07); if c.GetFlag(SREG_T) { c.Reg[d] |= (1 << b) } else { c.Reg[d] &= ^(1 << b) }; return 1 }
@@ -120,11 +136,89 @@ func (c *CPU) Execute(opcode uint16) int {
 	if (opcode & 0xFE0F) == 0x9201 { r,ptr := (opcode>>4)&0x1F, (uint16(c.Reg[31])<<8)|uint16(c.Reg[30]); c.Bus.WriteSRAM(ptr,c.Reg[r]); ptr++; c.Reg[30],c.Reg[31]=uint8(ptr),uint8(ptr>>8); return 2 }
 	if (opcode & 0xFE0F) == 0x9202 { r,ptr := (opcode>>4)&0x1F, ((uint16(c.Reg[31])<<8)|uint16(c.Reg[30]))-1; c.Reg[30],c.Reg[31]=uint8(ptr),uint8(ptr>>8); c.Bus.WriteSRAM(ptr,c.Reg[r]); return 2 }
 
-	if opcode == 0x9508 { pch,pcl := uint16(c.Pop()), uint16(c.Pop()); c.PC = (pch<<8)|pcl; return 4 }
-	if opcode == 0x9518 { pch,pcl := uint16(c.Pop()), uint16(c.Pop()); c.PC = (pch<<8)|pcl; c.SetFlag(SREG_I, true); return 4 }
+	// ADIW (1001 0110 KKdd KKKK)
+	if (opcode & 0xFF00) == 0x9600 {
+		k := uint16(opcode&0x0F) | uint16((opcode>>2)&0x30)
+		d := 24 + ((opcode >> 4) & 0x03) * 2
+		val := uint16(c.Reg[d]) | (uint16(c.Reg[d+1]) << 8)
+		res := val + k
+		c.Reg[d], c.Reg[d+1] = uint8(res&0xFF), uint8(res>>8)
+		c.SetFlag(SREG_Z, uint16(res) == 0)
+		c.SetFlag(SREG_N, (res&0x8000) != 0)
+		c.SetFlag(SREG_C, (val&^res)&0x8000 != 0)
+		c.SetFlag(SREG_V, (^val&res)&0x8000 != 0)
+		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
+		return 2
+	}
+	// SBIW (1001 0111 KKdd KKKK)
+	if (opcode & 0xFF00) == 0x9700 {
+		k := uint16(opcode&0x0F) | uint16((opcode>>2)&0x30)
+		d := 24 + ((opcode >> 4) & 0x03) * 2
+		val := uint16(c.Reg[d]) | (uint16(c.Reg[d+1]) << 8)
+		res := val - k
+		c.Reg[d], c.Reg[d+1] = uint8(res&0xFF), uint8(res>>8)
+		c.SetFlag(SREG_Z, uint16(res) == 0)
+		c.SetFlag(SREG_N, (res&0x8000) != 0)
+		c.SetFlag(SREG_C, (res&^val)&0x8000 != 0)
+		c.SetFlag(SREG_V, (val&^res)&0x8000 != 0)
+		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
+		return 2
+	}
+
+	if opcode == 0x9508 { pcl,pch := uint16(c.Pop()), uint16(c.Pop()); c.PC = (pch<<8)|pcl; return 4 }
+	if opcode == 0x9518 { pcl,pch := uint16(c.Pop()), uint16(c.Pop()); c.PC = (pch<<8)|pcl; c.SetFlag(SREG_I, true); return 4 }
+	// RCALL (1101 kkkk kkkk kkkk)
+	if (opcode & 0xF000) == 0xD000 {
+		k := int16(opcode & 0x0FFF)
+		if k&0x800 != 0 { k |= -4096 }
+		c.Push(uint8(c.PC & 0xFF)); c.Push(uint8(c.PC >> 8))
+		c.PC = uint16(int32(c.PC) + int32(k))
+		return 3
+	}
+	// ICALL (1001 0101 0000 1001)
+	if opcode == 0x9509 {
+		z := uint16(c.Reg[30]) | (uint16(c.Reg[31]) << 8)
+		c.Push(uint8(c.PC & 0xFF)); c.Push(uint8(c.PC >> 8))
+		c.PC = z; return 3
+	}
+	// IJMP (1001 0100 0000 1001)
+	if opcode == 0x9409 {
+		z := uint16(c.Reg[30]) | (uint16(c.Reg[31]) << 8)
+		c.PC = z; return 2
+	}
+	// LPM (1001 0101 1100 1000)
+	if opcode == 0x95C8 {
+		z := uint16(c.Reg[30]) | (uint16(c.Reg[31]) << 8)
+		word := flash[z>>1]
+		if z&1 != 0 { c.Reg[0] = uint8(word >> 8) } else { c.Reg[0] = uint8(word & 0xFF) }
+		return 3
+	}
 	if opcode == 0x95E8 { return 2 } // SPM
 	if opcode == 0x9588 { c.Bus.SetSleep(true); if c.Halted { c.PC-- }; return 1 }
-	if (opcode&0xFE0F) == 0x9406 { d := (opcode >> 4) & 0x1F; op1 := c.Reg[d]; res := op1 >> 1; c.Reg[d] = res; c.SetFlag(SREG_C, (op1&0x01) != 0); c.SetFlag(SREG_Z, res == 0); c.SetFlag(SREG_N, false); c.SetFlag(SREG_V, c.GetFlag(SREG_N) != c.GetFlag(SREG_C)); c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V)); return 1 }
+	if (opcode & 0xFE0F) == 0x9405 { // ASR
+		d := (opcode >> 4) & 0x1F
+		op1 := c.Reg[d]
+		res := (op1 >> 1) | (op1 & 0x80)
+		c.Reg[d] = res
+		c.SetFlag(SREG_C, (op1&0x01) != 0)
+		c.SetFlag(SREG_Z, res == 0)
+		c.SetFlag(SREG_N, (res&0x80) != 0)
+		c.SetFlag(SREG_V, (res&0x80 != 0) != (op1&0x01 != 0))
+		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
+		return 1
+	}
+	if (opcode & 0xFE0F) == 0x9406 { // LSR
+		d := (opcode >> 4) & 0x1F
+		op1 := c.Reg[d]
+		res := op1 >> 1
+		c.Reg[d] = res
+		c.SetFlag(SREG_C, (op1&0x01) != 0)
+		c.SetFlag(SREG_Z, res == 0)
+		c.SetFlag(SREG_N, false)
+		c.SetFlag(SREG_V, (res&0x80 != 0) != (op1&0x01 != 0))
+		c.SetFlag(SREG_S, c.GetFlag(SREG_N) != c.GetFlag(SREG_V))
+		return 1
+	}
 
 	return 1
 }

@@ -12,13 +12,14 @@ const (
 	SRAMSize     = 2560
 	IORegSize    = 64
 	ExtIORegSize = 160
+	TotalIORegs  = 0x100
 )
 
 type ATmega32u4 struct {
 	CPU        *cpu.CPU
 	FlashData  [FlashSize]uint16
 	SRAMData   [SRAMSize]uint8
-	IORegData  [0x100]uint8
+	IORegData  [TotalIORegs]uint8
 	Periph     *peripherals.Manager
 	EEPROMFile string
 
@@ -34,6 +35,7 @@ func NewATmega32u4() *ATmega32u4 {
 	mcu.Periph = peripherals.NewManager(mcu)
 	mcu.CPU = cpu.NewCPU(mcu, mcu)
 	mcu.CPU.TickPeripherals = mcu.Periph.Tick
+	mcu.Reset()
 	return mcu
 }
 
@@ -42,10 +44,10 @@ func (m *ATmega32u4) ReadSRAM(address uint16) uint8 {
 	if address < 32 {
 		return m.CPU.Reg[address]
 	}
-	if address < 32+uint16(len(m.IORegData)) {
+	if address < 32+TotalIORegs {
 		return m.ReadIO(address - 32)
 	}
-	sramAddr := address - (32 + uint16(len(m.IORegData)))
+	sramAddr := address - (32 + TotalIORegs)
 	if int(sramAddr) < len(m.SRAMData) {
 		return m.SRAMData[sramAddr]
 	}
@@ -55,10 +57,10 @@ func (m *ATmega32u4) ReadSRAM(address uint16) uint8 {
 func (m *ATmega32u4) WriteSRAM(address uint16, value uint8) {
 	if address < 32 {
 		m.CPU.Reg[address] = value
-	} else if address < 32+uint16(len(m.IORegData)) {
+	} else if address < 32+TotalIORegs {
 		m.WriteIO(address-32, value)
 	} else {
-		sramAddr := address - (32 + uint16(len(m.IORegData)))
+		sramAddr := address - (32 + TotalIORegs)
 		if int(sramAddr) < len(m.SRAMData) {
 			m.SRAMData[sramAddr] = value
 		}
@@ -124,6 +126,7 @@ func (m *ATmega32u4) FlashErase(address uint16) {
 
 func (m *ATmega32u4) FlashCommit(address uint16) {
 	// Commits SPM buffer to flash page
+	// Page size for 32u4 is 128 bytes (64 words).
 	pageSizeWords := uint16(64)
 	pageStart := (address / pageSizeWords) * pageSizeWords
 	for i := uint16(0); i < pageSizeWords; i++ {
@@ -154,6 +157,7 @@ func (m *ATmega32u4) SaveEEPROM() error {
 }
 
 func (m *ATmega32u4) PinCallback(port int8, mask uint8, value uint8) {
+	m.Periph.HandlePinChange(port, mask, value)
 	if m.PinCallbackFunc != nil {
 		m.PinCallbackFunc(port, mask, value)
 	}
@@ -177,11 +181,38 @@ func (m *ATmega32u4) LoadEEPROM(filename string) error {
 	return nil
 }
 
+func (m *ATmega32u4) Reset() {
+	// Reset CPU
+	m.CPU.PC = 0
+	m.CPU.SP = uint16(cpu.SRAMStart + SRAMSize - 1)
+	m.CPU.SREG = 0
+	m.CPU.Halted = false
+	for i := range m.CPU.Reg {
+		m.CPU.Reg[i] = 0
+	}
+
+	// Reset IO Registers
+	for i := range m.IORegData {
+		m.IORegData[i] = 0
+	}
+
+	// Reset Peripherals state
+	m.Periph.Reset()
+
+	m.PendingInterrupts = 0
+	m.GlobalInterrupts = false
+}
+
 func (m *ATmega32u4) Step() error {
 	if m.PendingInterrupts != 0 {
 		// Wake up on any pending interrupt
 		m.Periph.SleepEnabled = false
 		m.CPU.Halted = false
+	}
+
+	if m.Periph.WatchdogReset {
+		m.Reset()
+		return nil
 	}
 
 	if m.GlobalInterrupts && m.PendingInterrupts != 0 {
@@ -237,25 +268,23 @@ func (m *ATmega32u4) handleSPM() {
 
 func (m *ATmega32u4) handleInterrupts() {
 	// ATmega32u4 has vectors 1 to 42.
-	// Vector 1: RESET
-	// Vector 2: INT0
-	// Vector 43: USB Endpoint (some sources say 43, datasheet says 42 vectors total including RESET)
-	// We'll scan from 1 (excluding RESET which is vector 1)
+	// Vector 1: RESET (handled separately usually)
+	// Vector 2: INT0 (bit 1)
+	// Vector 42: USB General (bit 41)
+	// PendingInterrupts is a bitmask where bit i corresponds to Vector i+1.
 	for i := uint8(1); i < 43; i++ {
-		if (m.PendingInterrupts & (1 << i)) != 0 {
+		if (m.PendingInterrupts & (1 << uint64(i))) != 0 {
 			m.executeInterrupt(i + 1)
-			m.PendingInterrupts &= ^(1 << i)
+			m.PendingInterrupts &= ^(1 << uint64(i))
 			break
 		}
 	}
 }
 
 func (m *ATmega32u4) executeInterrupt(vector uint8) {
-	// Vector 1 is RESET at 0x0000.
-	// Vector 2 is INT0 at 0x0002.
 	// Address = (VectorNumber - 1) * 2
-	m.CPU.Push(uint8(m.CPU.PC & 0xFF))
 	m.CPU.Push(uint8((m.CPU.PC >> 8) & 0xFF))
+	m.CPU.Push(uint8(m.CPU.PC & 0xFF))
 	m.CPU.SetFlag(cpu.SREG_I, false)
 	m.GlobalInterrupts = false
 	m.CPU.PC = uint16(vector-1) * 2

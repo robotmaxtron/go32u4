@@ -20,20 +20,20 @@ benchmarking `.hex` files.
 
 ### Peripherals Implementation
 
-| Component            | Status      | Implementation Details                                                          |
-|:---------------------|:------------|:--------------------------------------------------------------------------------|
-| **Interrupts**       | Implemented | Vector table handling, hardware-accurate prioritization, and execution logic.   |
-| **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR A/B/C) support.         |
-| **Timer 4**          | Implemented | 10-bit high-speed timer with PLL-based 64MHz clocking support and OCR4C as TOP. |
+| Component            | Status      | Implementation Details                                                                |
+|:---------------------|:------------|:--------------------------------------------------------------------------------------|
+| **Interrupts**       | Implemented | Vector table handling, hardware-accurate prioritization, and execution logic.         |
+| **Timers (0, 1, 3)** | Implemented | Prescalers, overflow interrupts, and compare-match (OCR A/B/C) support.               |
+| **Timer 4**          | Implemented | 10-bit high-speed timer with PLL-based 64MHz clocking support and OCR4C as TOP.       |
 | **USB Controller**   | Implemented | Register-accurate USB 2.0 endpoint management, HID report capture, and state machine. |
-| **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                         |
-| **EEPROM**           | Implemented | Fully functional with 3.4ms write timing simulation and disk-backed persistence.|
-| **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.        |
-| **MCP23018**         | Implemented | Full emulation of I2C I/O expander with banked registers and pin logic.         |
-| **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                |
-| **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.        |
-| **Macro Execution**  | Implemented | Sequence-based HID report generation for complex macros with delay support.     |
-| **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register (PRR) support.                 |
+| **GPIO**             | Implemented | Register-level simulation with `PinCallback` mechanism.                               |
+| **EEPROM**           | Implemented | Fully functional with 3.4ms write timing simulation and disk-backed persistence.      |
+| **USART/SPI/TWI**    | Implemented | USART1 (Serial), SPI transfer flags, and TWI (I2C) master state machine.              |
+| **MCP23018**         | Implemented | Full emulation of I2C I/O expander with banked registers and pin logic.               |
+| **ADC**              | Implemented | Basic conversion logic and interrupt triggering.                                      |
+| **Watchdog Timer**   | Implemented | Watchdog state and system reset logic including full `WDTCSR` bit logic.              |
+| **Macro Execution**  | Implemented | Sequence-based HID report generation for complex macros with delay support.           |
+| **Sleep Modes**      | Implemented | `SLEEP` instruction and power reduction register (PRR) support.                       |
 
 ## Known Gaps & Missing Features
 
@@ -94,11 +94,11 @@ Current code coverage results (as of March 2026):
 | Package           | Statement Coverage            |
 |:------------------|:------------------------------|
 | `pkg/bus`         | 0.0% (interface only)         |
-| `pkg/cpu`         | 78.8% (core ISA coverage)     |
+| `pkg/cpu`         | 76.4% (core ISA coverage)     |
 | `pkg/loader`      | 85.0% (comprehensive parsing) |
 | `pkg/mcu`         | 91.7% (memory and interrupts) |
-| `pkg/peripherals` | 82.5% (core I/O and timers)   |
-| **Total**         | **78.8%**                     |
+| `pkg/peripherals` | 82.7% (core I/O and timers)   |
+| **Total**         | **81.7%**                     |
 
 To run tests and generate a coverage report:
 ```bash
@@ -117,8 +117,8 @@ golangci-lint run ./...
 
 The simulator is optimized for speed, leveraging Go's efficient execution. Benchmarks show:
 
-- **Instruction Execution**: ~23.2 ns/op (approx. 43.1 MHz simulated speed)
-- **Overall Performance**: ~43.1 MHz (on Apple M4)
+- **Instruction Execution**: ~22.9 ns/op (approx. 43.7 MHz simulated speed)
+- **Overall Performance**: ~48.4 MHz (on Apple M4)
 
 This performance exceeds the real ATmega32u4's 16 MHz clock, making it ideal for rapid firmware validation and CI pipelines.
 

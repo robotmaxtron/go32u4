@@ -12,9 +12,9 @@ func TestCPUInitialization(t *testing.T) {
 	if m.CPU.PC != 0 {
 		t.Errorf("Expected PC 0, got %d", m.CPU.PC)
 	}
-	// 64 (IO) + 160 (ExtIO) + 2560 (SRAM) - 1 = 2783 = 0xADF
-	if m.CPU.SP != 0x0ADF {
-		t.Errorf("Expected SP 0x0ADF, got %04X", m.CPU.SP)
+	// 32 (Regs) + 256 (IO) + 2560 (SRAM) - 1 = 2847 = 0x0B1F
+	if m.CPU.SP != 0x0B1F {
+		t.Errorf("Expected SP 0x0B1F, got %04X", m.CPU.SP)
 	}
 }
 
@@ -139,15 +139,15 @@ func TestStack(t *testing.T) {
 	m.FlashData[1] = 0x911F
 
 	_ = m.Step()
-	if m.CPU.SP != 0x0ADE {
-		t.Errorf("Expected SP 0x0ADE, got %04X", m.CPU.SP)
+	if m.CPU.SP != 0x0B1E {
+		t.Errorf("Expected SP 0x0B1E, got %04X", m.CPU.SP)
 	}
 
 	_ = m.Step()
 	if m.CPU.Reg[17] != 0xAA {
 		t.Errorf("Expected R17 0xAA, got %02X", m.CPU.Reg[17])
 	}
-	if m.CPU.SP != 0x0ADF {
-		t.Errorf("Expected SP 0x0ADF, got %04X", m.CPU.SP)
+	if m.CPU.SP != 0x0B1F {
+		t.Errorf("Expected SP 0x0B1F, got %04X", m.CPU.SP)
 	}
 }

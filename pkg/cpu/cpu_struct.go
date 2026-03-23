@@ -18,6 +18,8 @@ const (
 const (
 	IORegSize    = 64
 	ExtIORegSize = 160
+	TotalIORegs  = 256
+	SRAMStart    = 32 + TotalIORegs
 )
 
 type CPU struct {
@@ -35,7 +37,7 @@ type CPU struct {
 
 func NewCPU(b bus.Bus, ic bus.InterruptController) *CPU {
 	return &CPU{
-		SP:                  uint16(IORegSize + ExtIORegSize + 2560 - 1), // Default top of SRAM for 32u4
+		SP:                  uint16(SRAMStart + 2560 - 1), // Default top of SRAM for 32u4
 		Bus:                 b,
 		InterruptController: ic,
 	}

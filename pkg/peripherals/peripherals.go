@@ -1,5 +1,10 @@
 package peripherals
 
+const (
+	SYS_FREQ = 16000000 // 16 MHz
+	WDT_FREQ = 128000   // 128 kHz
+)
+
 // ATmega32u4 IO Addresses (0x00-0x3F) and Extended IO (0x60-0xFF)
 const (
 	PINB  = 0x03
@@ -90,17 +95,17 @@ const (
 	UBRR1H = 0xCD
 
 	// SPI Registers
-	SPCR = 0x4C
-	SPSR = 0x4D
-	SPDR = 0x4E
+	SPCR = 0x2C
+	SPSR = 0x2D
+	SPDR = 0x2E
 
 	// TWI Registers
-	TWBR  = 0x70
-	TWSR  = 0x71
-	TWAR  = 0x72
-	TWDR  = 0x73
-	TWCR  = 0x74
-	TWAMR = 0x75
+	TWBR = 0xB8
+	TWSR = 0xB9
+	TWAR = 0xBA
+	TWDR = 0xBB
+	TWCR = 0xBC
+	TWAMR = 0xBD
 
 	// ADC Registers
 	ADMUX  = 0x7C
@@ -110,6 +115,9 @@ const (
 	ADCH   = 0x79
 	DIDR0  = 0x7E
 	DIDR2  = 0x7D
+
+	// Timer 3 Mask Register
+	// TIFR3  = 0x18 // Timer/Counter3 Interrupt Flag Register
 
 	// Timer4 Registers
 	TCCR4A = 0xC0
@@ -126,34 +134,35 @@ const (
 	DT4    = 0xD4
 
 	// PLL Registers
-	PLLCSR = 0x49
+	PLLCSR = 0x29
 	PLLE   = 1
 	PLOCK  = 0
 	PCKE   = 2
 
 	// USB Registers (Simplified CDC mapping)
-	UHWCON  = 0xD7
-	USBCON  = 0xD8
-	USBSTA  = 0xD9
-	USBINT  = 0xDA
-	UDCON   = 0xE0
-	UDINT   = 0xE1
-	UDIEN   = 0xE2
-	UDADDR  = 0xE3
-	UEINTX  = 0xE8
+	UHWCON  = 0x47
+	USBCON  = 0x48
+	USBSTA  = 0x49
+	USBINT  = 0x4A
+	UDCON   = 0x4B
+	UDINT   = 0x4C
+	UDIEN   = 0x4D
+	UDADDR  = 0xE8
 	UENUM   = 0xE9
-	UERST   = 0xEA
-	UECONX  = 0xEB
-	UECFG0X = 0xEC
-	UECFG1X = 0xED
-	UESTA0X = 0xEE
-	UESTA1X = 0xEF
-	UEDATX  = 0xF1
-	UEBCLX  = 0xF2
-	UEINT   = 0xF4
+	UEINT   = 0xEA
+	UEINTX  = 0xEB
+	UERST   = 0xEC
+	UECONX  = 0x53
+	UECFG0X = 0x54
+	UECFG1X = 0x55
+	UESTA0X = 0x56
+	UESTA1X = 0x57
+	UEDATX  = 0x58
+	UEBCLX  = 0x59
+	UEBCHX  = 0x5A
 
 	// Power Management
-	SMCR = 0x53 // Sleep Mode Control Register
+	SMCR = 0x5B // Sleep Mode Control Register
 
 	// SPM Control and Status Register
 	SPMCSR = 0x37
@@ -178,7 +187,85 @@ const (
 	WDP3 = 5
 	WDIE = 6
 	WDIF = 7
+
+	ADIF = 4
+	
+	// Power Reduction Registers
+	PRR0 = 0x64
+	PRR1 = 0x65
+	
+	// PRR0 bits
+	PRTWI    = 6
+	PRTIM0   = 5
+	PRTIM1   = 3
+	PRSPI    = 2
+	PRUSART1 = 1
+	PRADC    = 0
+	
+	// PRR1 bits
+	PRUSB  = 7
+	PRTIM4 = 4
+	PRTIM3 = 3
 )
+
+// RegisterMasks defines write masks for I/O registers to protect read-only and reserved bits.
+// A '1' in the mask means the bit is writable.
+// Any address not in this map will have a default mask of 0xFF.
+var RegisterMasks = map[uint16]uint8{
+	// PIN/DDR/PORT are handled specially or fully writable
+	PINB: 0xFF, DDRB: 0xFF, PORTB: 0xFF,
+	PINC: 0xFF, DDRC: 0xFF, PORTC: 0xFF,
+	PIND: 0xFF, DDRD: 0xFF, PORTD: 0xFF,
+	PINE: 0xFF, DDRE: 0xFF, PORTE: 0xFF,
+	PINF: 0xFF, DDRF: 0xFF, PORTF: 0xFF,
+
+	// Timer 0
+	TCCR0A: 0xFF, TCCR0B: 0xFF, TCNT0: 0xFF, OCR0A: 0xFF, OCR0B: 0xFF, TIMSK0: 0x07, TIFR0: 0x07,
+
+	// Timer 1
+	TCCR1A: 0xFF, TCCR1B: 0xFF, TCCR1C: 0xFF, TCNT1L: 0xFF, TCNT1H: 0xFF,
+	ICR1L: 0xFF, ICR1H: 0xFF, OCR1AL: 0xFF, OCR1AH: 0xFF, OCR1BL: 0xFF, OCR1BH: 0xFF,
+	OCR1CL: 0xFF, OCR1CH: 0xFF, TIMSK1: 0x2F, TIFR1: 0x2F,
+
+	// Timer 3
+	TCCR3A: 0xFF, TCCR3B: 0xFF, TCCR3C: 0xFF, TCNT3L: 0xFF, TCNT3H: 0xFF,
+	ICR3L: 0xFF, ICR3H: 0xFF, OCR3AL: 0xFF, OCR3AH: 0xFF, OCR3BL: 0xFF, OCR3BH: 0xFF,
+	OCR3CL: 0xFF, OCR3CH: 0xFF, TIMSK3: 0x2F, TIFR3: 0x2F,
+
+	// Timer 4
+	TCCR4A: 0xFF, TCCR4B: 0x7F, TCCR4C: 0xFF, TCCR4D: 0xFF, TCCR4E: 0xFF,
+	TCNT4: 0xFF, TC4H: 0x03, OCR4A: 0xFF, OCR4B: 0xFF, OCR4C: 0xFF, OCR4D: 0xFF,
+	DT4: 0xFF, TIMSK4: 0xEE, TIFR4: 0xEE,
+
+	// TWI
+	TWBR: 0xFF, TWSR: 0x03, TWAR: 0xFF, TWDR: 0xFF, TWCR: 0xFF, TWAMR: 0xFE,
+
+	// ADC
+	ADMUX: 0xFF, ADCSRA: 0xEF, ADCSRB: 0x7F, ADCL: 0xFF, ADCH: 0xFF, DIDR0: 0xFF, DIDR2: 0xFF,
+
+	// SPI
+	SPCR: 0xFF, SPSR: 0x01,
+
+	// UART1
+	UCSR1A: 0x03, UCSR1B: 0xFF, UCSR1C: 0xFF, UBRR1L: 0xFF, UBRR1H: 0x0F, UDR1: 0xFF,
+
+	// EEPROM
+	EEARL: 0xFF, EEARH: 0x03, EEDR: 0xFF, EECR: 0x3F,
+
+	// PLL
+	PLLCSR: 0x1E,
+
+	// USB
+	UHWCON: 0x81, USBCON: 0xBF, USBSTA: 0x00, USBINT: 0x00,
+	UDCON: 0x03, UDINT: 0xFF, UDIEN: 0xFF, UDADDR: 0xFF,
+	UENUM: 0x07, UERST: 0x7F, UECONX: 0xFF, UECFG0X: 0xFF, UECFG1X: 0xFF,
+	UESTA0X: 0x00, UESTA1X: 0x00, UEDATX: 0xFF, UEBCLX: 0x00, UEBCHX: 0x00,
+	UEINT: 0x00, UEINTX: 0xFF,
+
+	// Misc
+	SMCR: 0x0F, SPMCSR: 0xBF, WDTCSR: 0xFF, PRR0: 0xFF, PRR1: 0xFF,
+	EICRA: 0xFF, EICRB: 0x33, EIMSK: 0xFF, EIFR: 0xFF, PCICR: 0x01, PCIFR: 0x01, PCMSK0: 0xFF,
+}
 
 // MacroRecord represents a single HID report in a macro sequence.
 type MacroRecord struct {
@@ -316,6 +403,8 @@ type Manager struct {
 
 	// I2C/TWI Pull-up
 	PullUpResistor float64 // Pull-up resistor value in ohms (default 2200)
+
+	Timer4SubCycles uint64 // For precise clock scaling
 }
 
 type TWIClient interface {
@@ -336,12 +425,41 @@ func (m *Manager) TriggerMacro(table MacroTable) {
 	m.MacroActive = true
 }
 
+func (m *Manager) Reset() {
+	m.Timer0Counter = 0
+	m.Timer0ControlA = 0
+	m.Timer0ControlB = 0
+	m.Timer1Counter = 0
+	m.Timer1ControlA = 0
+	m.Timer1ControlB = 0
+	m.Timer3Counter = 0
+	m.Timer3ControlA = 0
+	m.Timer3ControlB = 0
+	m.Timer4Counter = 0
+	m.Timer4ControlA = 0
+	m.Timer4ControlB = 0
+	m.WatchdogCycles = 0
+	m.WatchdogReset = false
+	m.EEPROMWriteTimer = 0
+	m.SPMTimeout = 0
+	m.SleepEnabled = false
+	m.USBSelectedEP = 0
+	m.USBConfigured = false
+	// Reset FIFOs
+	for i := range m.USBEndpoints {
+		m.USBEndpoints[i].FIFO = nil
+		m.USBEndpoints[i].SetupFIFO = nil
+		m.USBEndpoints[i].Interrupt = 0
+	}
+}
+
 func NewManager(sys System) *Manager {
 	m := &Manager{
 		Sys: sys,
 	}
 	// Default I2C pull-up for ErgoDox
 	m.PullUpResistor = 2200.0
+	m.Reset()
 	return m
 }
 
@@ -349,7 +467,33 @@ func NewManager(sys System) *Manager {
 func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 	ioRegs := m.Sys.IORegs()
 	if isWrite {
+		// Apply register mask
+		mask, ok := RegisterMasks[address]
+		if !ok {
+			mask = 0xFF // Default to fully writable if not in mask table
+		}
+		
+		if mask == 0 && address != TIFR0 && address != TIFR1 && address != TIFR3 && address != TIFR4 &&
+			address != EIFR && address != PCIFR && address != ADCSRA && address != UEINTX {
+			// If mask is 0 and it's not a special register handled below, it's read-only
+			return ioRegs[address]
+		}
+		
+		// For masked registers, apply the mask unless it's handled specially below
 		switch address {
+		case TIFR0, TIFR1, TIFR3, TIFR4, EIFR, PCIFR, ADCSRA, UEINTX:
+			// These are handled specially below (e.g. W1C)
+		default:
+			if ok {
+				value = (value & mask) | (ioRegs[address] & ^mask)
+			}
+		}
+
+		switch address {
+		case TIFR0, TIFR1, TIFR3, TIFR4, EIFR, PCIFR:
+			// Write-1-to-Clear
+			ioRegs[address] &= ^value
+			return ioRegs[address]
 		case PORTB, DDRB, PORTC, DDRC, PORTD, DDRD, PORTE, DDRE, PORTF, DDRF:
 			oldVal := ioRegs[address]
 			ioRegs[address] = value
@@ -420,7 +564,17 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 		case OCR3CL:
 			m.Timer3CompareC = (m.Timer3CompareC & 0xFF00) | uint16(value)
 		case OCR3CH:
-			m.Timer3CompareC = (m.Timer3CompareC & 0x00FF) | (uint16(value) << 8)
+  	m.Timer3CompareC = (m.Timer3CompareC & 0x00FF) | (uint16(value) << 8)
+		case EICRA:
+			ioRegs[EICRA] = value
+		case EICRB:
+			ioRegs[EICRB] = value
+		case EIMSK:
+			ioRegs[EIMSK] = value
+		case PRR0:
+			ioRegs[PRR0] = value
+		case PRR1:
+			ioRegs[PRR1] = value
 		case TCCR3A:
 			m.Timer3ControlA = value
 		case TCCR3B:
@@ -441,14 +595,29 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				m.Sys.TriggerInterrupt(18)
 			}
 		case ADCSRA:
+			// W1C for ADIF (bit 4)
+			if value&(1<<ADIF) != 0 {
+				ioRegs[ADCSRA] &= ^uint8(1 << ADIF)
+			}
+			// Normal bits (ADEN, ADSC, ADATE, ADIE, ADPS)
+			// ADEN=7, ADSC=6, ADATE=5, ADIE=3, ADPS=2:0
+			// mask includes all these bits.
+			mask := uint8((1 << 7) | (1 << 6) | (1 << 5) | (1 << 3) | 0x07)
+			ioRegs[ADCSRA] = (ioRegs[ADCSRA] & ^mask) | (value & mask)
+
 			if value&(1<<6) != 0 {
+				// Simulate conversion start
 				ioRegs[ADCSRA] &= ^uint8(1 << 6)
-				ioRegs[ADCSRA] |= 1 << 4
-				if value&(1<<3) != 0 {
-					m.Sys.TriggerInterrupt(29)
-				}
+				ioRegs[ADCSRA] |= 1 << ADIF
+			}
+			if ioRegs[ADCSRA]&(1<<4) != 0 && ioRegs[ADCSRA]&(1<<3) != 0 {
+				m.Sys.TriggerInterrupt(29)
 			}
 		case EECR:
+			// Block writes if EEPROM is busy
+			if m.EEPROMWriteTimer > 0 {
+				return ioRegs[EECR]
+			}
 			if value&0x01 != 0 {
 				addr := (uint16(ioRegs[EEARH]) << 8) | uint16(ioRegs[EEARL])
 				if addr < uint16(len(m.EEPROM)) {
@@ -463,8 +632,8 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 						m.EEPROM[addr] = ioRegs[EEDR]
 						_ = m.Sys.SaveEEPROM()
 					}
-					// Start the write timer (simulate 3.4ms @ 16MHz = ~54,400 cycles)
-					m.EEPROMWriteTimer = 54400
+					// Start the write timer (simulate 3.3ms @ SYS_FREQ)
+					m.EEPROMWriteTimer = (33 * SYS_FREQ) / 10000 // 3.3ms
 					// Clear EEMPE bit as per datasheet (cleared by hardware after 4 cycles, but here we clear it after EEPE is set)
 					value &= ^uint8(0x04)
 				} else {
@@ -473,6 +642,16 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				}
 			}
 			ioRegs[EECR] = value
+		case EEDR:
+			// Block writes if EEPROM is busy
+			if m.EEPROMWriteTimer > 0 {
+				return ioRegs[EEDR]
+			}
+			ioRegs[address] = value
+		case TWSR:
+			// Bits 7:3 are status (read-only), 2 is reserved, 1:0 are prescaler (RW)
+			value = (value & 0x03) | (ioRegs[TWSR] & 0xF8)
+			ioRegs[address] = value
 		case TWDR:
 			m.TWIBuffer = value
 			ioRegs[address] = value
@@ -499,6 +678,10 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			if (ioRegs[TWCR]&(1<<7)) != 0 && (ioRegs[TWCR]&(1<<0)) != 0 {
 				m.Sys.TriggerInterrupt(24)
 			}
+		case USBSTA:
+			// VBUS (bit 0) is read-only
+			value = (value & ^uint8(0x01)) | (ioRegs[USBSTA] & 0x01)
+			ioRegs[address] = value
 		case UENUM:
 			m.USBSelectedEP = value & 0x07
 			if m.USBSelectedEP < 7 {
@@ -509,14 +692,16 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				ioRegs[UESTA1X] = ep.Status1
 				ioRegs[UECONX] = ep.Control
 				ioRegs[UEINTX] = ep.Interrupt
-				ioRegs[UEBCLX] = uint8(len(ep.FIFO))
+				ioRegs[UEBCLX] = uint8(len(ep.FIFO) & 0xFF)
+				ioRegs[UEBCHX] = uint8(len(ep.FIFO) >> 8)
 			}
 			ioRegs[address] = value
 		case UEDATX:
 			if m.USBSelectedEP < 7 {
 				ep := &m.USBEndpoints[m.USBSelectedEP]
 				ep.FIFO = append(ep.FIFO, value)
-				ioRegs[UEBCLX] = uint8(len(ep.FIFO))
+				ioRegs[UEBCLX] = uint8(len(ep.FIFO) & 0xFF)
+				ioRegs[UEBCHX] = uint8(len(ep.FIFO) >> 8)
 			}
 			ioRegs[address] = value
 		case UEINTX:
@@ -591,17 +776,16 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			m.SleepEnabled = (value & 0x01) != 0
 			ioRegs[address] = value
 		case SPMCSR:
+			// Bit 6 (RWWSB) is read-only
+			value = (value & ^uint8(1<<RWWSB)) | (ioRegs[SPMCSR] & (1 << RWWSB))
 			// SPMCSR handling
 			// Bits: SPMIE, RWWSB, SIGRD, RWWSRE, BLBSET, PGWRT, PGERS, SPMEN
 			// SPMEN is automatically cleared after 4 cycles if not used by SPM instruction.
 			if (value & (1 << SPMEN)) != 0 {
 				m.SPMTimeout = 4
-				// Handle flash operations if triggered by setting PGERS or PGWRT along with SPMEN
-				// (In actual hardware it's triggered by the SPM instruction, but we can also
-				// check here for convenience if the instruction implementation is simple)
-				// Actually, we should only do it on the SPM instruction.
-				// But we need to capture Z pointer. The Manager doesn't have Z pointer.
-				// The ATmega32u4 WriteIO will call us.
+			}
+			if (value & (1 << PGWRT)) != 0 {
+				m.SPMTimeout = 4 // PGWRT is also cleared after 4 cycles or SPM execution
 			}
 			ioRegs[address] = value
 		case WDTCSR:
@@ -610,12 +794,8 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 			// Setting these bits initiates a 4-cycle window for further changes.
 			if (value&(1<<WDCE)) != 0 && (value&(1<<WDE)) != 0 {
 				m.WatchdogTimedChange = 4
-				// We don't update WDTCSR with these bits yet, as per datasheet
-				// actually the datasheet says "Within the next four clock cycles, write the WDE and Watchdog prescaler
-				// bits (WDP) as desired, but with the WDCE bit cleared."
-				// "The WDCE bit is always cleared by hardware after four clock cycles."
-				ioRegs[WDTCSR] |= (1 << WDCE) | (1 << WDE)
-				return value
+				ioRegs[address] = value
+				return ioRegs[address]
 			}
 
 			// If we are in the timed change window or the WDE bit is being cleared
@@ -630,7 +810,7 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 		default:
 			ioRegs[address] = value
 		}
-		return value
+		return ioRegs[address]
 	} else {
 		switch address {
 		case TCNT0:
@@ -689,15 +869,21 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 				ep := &m.USBEndpoints[m.USBSelectedEP]
 				if len(ep.FIFO) > 0 {
 					val := ep.FIFO[0]
-					ep.FIFO = ep.FIFO[1:]
-					ioRegs[UEBCLX] = uint8(len(ep.FIFO))
+ 				ep.FIFO = ep.FIFO[1:]
+					ioRegs[UEBCLX] = uint8(len(ep.FIFO) & 0xFF)
+					ioRegs[UEBCHX] = uint8(len(ep.FIFO) >> 8)
 					return val
 				}
 			}
 			return 0
 		case UEBCLX:
 			if m.USBSelectedEP < 7 {
-				return uint8(len(m.USBEndpoints[m.USBSelectedEP].FIFO))
+				return uint8(len(m.USBEndpoints[m.USBSelectedEP].FIFO) & 0xFF)
+			}
+			return 0
+		case UEBCHX:
+			if m.USBSelectedEP < 7 {
+				return uint8(len(m.USBEndpoints[m.USBSelectedEP].FIFO) >> 8)
 			}
 			return 0
 		case TC4H:
@@ -738,15 +924,107 @@ func (m *Manager) IOCallback(address uint16, value uint8, isWrite bool) uint8 {
 }
 
 func (m *Manager) Tick(cycles uint64) {
-	m.updateTimer0(cycles)
-	m.updateTimer1(cycles)
-	m.updateTimer3(cycles)
-	m.updateTimer4(cycles)
+	ioRegs := m.Sys.IORegs()
+	prr0 := ioRegs[PRR0]
+	prr1 := ioRegs[PRR1]
+
+	if (prr0 & (1 << PRTIM0)) == 0 {
+		m.updateTimer0(cycles)
+	}
+	if (prr0 & (1 << PRTIM1)) == 0 {
+		m.updateTimer1(cycles)
+	}
+	if (prr1 & (1 << PRTIM3)) == 0 {
+		m.updateTimer3(cycles)
+	}
+	if (prr1 & (1 << PRTIM4)) == 0 {
+		m.updateTimer4(cycles)
+	}
 	m.updateWatchdog(cycles)
-	m.updateUSB()
+	if (prr1 & (1 << PRUSB)) == 0 {
+		m.updateUSB()
+	}
 	m.updateSPM(cycles)
 	m.updateEEPROM(cycles)
 	m.updateMacro(cycles)
+}
+
+func (m *Manager) HandlePinChange(port int8, mask uint8, value uint8) {
+	ioRegs := m.Sys.IORegs()
+	
+	// External Interrupts INT0-INT3 are on Port D
+	if port == 'D' {
+		// INT0: PD0, INT1: PD1, INT2: PD2, INT3: PD3
+		for i := uint8(0); i <= 3; i++ {
+			if (mask & (1 << i)) != 0 {
+				m.checkExternalInterrupt(i, (value>>i)&1)
+			}
+		}
+	}
+	// INT6 is on Port E bit 6
+	if port == 'E' && (mask&(1<<6)) != 0 {
+		m.checkExternalInterrupt(6, (value>>6)&1)
+	}
+
+	// PCINT0 on Port B
+	if port == 'B' {
+		if (ioRegs[PCICR] & 0x01) != 0 {
+			pcmask0 := ioRegs[PCMSK0]
+			if (mask & pcmask0) != 0 {
+				ioRegs[PCIFR] |= 0x01
+				m.Sys.TriggerInterrupt(9) // PCINT0 vector
+			}
+		}
+	}
+}
+
+func (m *Manager) checkExternalInterrupt(intNum uint8, level uint8) {
+	ioRegs := m.Sys.IORegs()
+	if (ioRegs[EIMSK] & (1 << intNum)) == 0 {
+		return
+	}
+
+	var mode uint8
+	if intNum <= 3 {
+		mode = (ioRegs[EICRA] >> (intNum * 2)) & 0x03
+	} else if intNum == 6 {
+		mode = (ioRegs[EICRB] >> 4) & 0x03 // INT6 is bits 4:5 of EICRB
+	} else {
+		return
+	}
+
+	trigger := false
+	switch mode {
+	case 0: // Low level
+		if level == 0 {
+			trigger = true
+		}
+	case 1: // Any edge
+		trigger = true
+	case 2: // Falling edge
+		if level == 0 {
+			trigger = true
+		}
+	case 3: // Rising edge
+		if level == 1 {
+			trigger = true
+		}
+	}
+
+	if trigger {
+		ioRegs[EIFR] |= (1 << intNum)
+		// Vector numbers: INT0: 2, INT1: 3, INT2: 4, INT3: 5, INT6: 7
+		vector := uint8(0)
+		switch intNum {
+		case 0, 1, 2, 3:
+			vector = 2 + intNum
+		case 6:
+			vector = 7
+		}
+		if vector != 0 {
+			m.Sys.TriggerInterrupt(vector)
+		}
+	}
 }
 
 func (m *Manager) updateMacro(cycles uint64) {
@@ -799,7 +1077,7 @@ func (m *Manager) updateSPM(cycles uint64) {
 
 		if m.SPMTimeout == 0 {
 			ioRegs := m.Sys.IORegs()
-			ioRegs[SPMCSR] &= ^uint8(1 << SPMEN)
+			ioRegs[SPMCSR] &= ^uint8((1 << SPMEN) | (1 << PGWRT) | (1 << PGERS) | (1 << RWWSRE) | (1 << BLBSET))
 		}
 	}
 }
@@ -1068,31 +1346,27 @@ func (m *Manager) updateTimer4(cycles uint64) {
 
 	// Clock source
 	usePLL := (m.PLLControl & (1 << PCKE)) != 0
-
+	is96MHz := (m.PLLControl & (1 << 4)) != 0 // PINDIV bit for 32U4 (96MHz if 1)
+	
 	divisor := uint64(1)
 	if prescaler >= 1 && prescaler <= 15 {
 		divisor = 1 << (prescaler - 1)
 	}
 
-	// Adjust divisor for PLL if needed (PLL is 64MHz, System is 16MHz)
-	// If PCKE is set, Timer 4 runs at 64MHz.
-	// Since Tick() is called with system cycles (16MHz),
-	// we need to process 4 Timer 4 cycles for every 1 system cycle if PCKE is set.
-	t4Cycles := cycles
+	// Adjust cycles based on clock source relative to system clock (16MHz)
+	// PLL is either 64MHz or 96MHz.
+	tickIncr := uint64(1)
 	if usePLL {
-		t4Cycles = cycles * 4
+		if is96MHz {
+			tickIncr = 6 // 96MHz / 16MHz = 6
+		} else {
+			tickIncr = 4 // 64MHz / 16MHz = 4
+		}
 	}
 
-	for i := uint64(0); i < t4Cycles; i++ {
-		// This is a simplification. For precise timing, we should track sub-cycle progress.
-		// But given the current Tick(cycles) architecture, we process them in bulk.
-
-		// If divisor is > 1, we skip ticks.
-		// For simplicity, we only tick if i % divisor == 0
-		if i%divisor != 0 {
-			continue
-		}
-
+	m.Timer4SubCycles += cycles * tickIncr
+	for m.Timer4SubCycles >= divisor {
+		m.Timer4SubCycles -= divisor
 		m.Timer4Counter++
 
 		// OCR4C acts as TOP in many modes
@@ -1275,8 +1549,5 @@ func (m *Manager) updateWatchdogTimeout(wdtcsr uint8) {
 	// 9: 1024K cycles (~8.0s)
 
 	wdtTicks := uint64(2048) << prescaler
-	// If the CPU is 16MHz, then 16ms is 256,000 cycles.
-	// 128 ticks of 125 cycles each = 16000 cycles? No.
-	// 2048 * 125 = 256,000. Correct.
-	m.WatchdogTimeout = wdtTicks * 125
+	m.WatchdogTimeout = wdtTicks * (SYS_FREQ / WDT_FREQ)
 }

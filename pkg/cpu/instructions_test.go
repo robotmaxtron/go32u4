@@ -61,31 +61,31 @@ func TestCPC(t *testing.T) {
 
 func TestSBI_CBI(t *testing.T) {
 	m := mcu.NewATmega32u4()
-	// Using a simple IO register EIFR (0x1C)
-	// SBI 0x1C, 3 (1001 1010 AAAA Abbb) -> 0x9AE3
-	m.FlashData[0] = 0x9AE3
-	// CBI 0x1C, 3 (1001 1000 AAAA Abbb) -> 0x98E3
-	m.FlashData[1] = 0x98E3
+	// Using a simple IO register DDRB (0x04) which is not W1C
+	// SBI 0x04, 3 (1001 1010 AAAA Abbb) -> 0x9A23
+	m.FlashData[0] = 0x9A23
+	// CBI 0x04, 3 (1001 1000 AAAA Abbb) -> 0x9823
+	m.FlashData[1] = 0x9823
 
 	_ = m.Step()
-	if (m.CPU.ReadIO(0x1C) & 0x08) == 0 {
-		t.Errorf("Expected bit 3 set, got %02X", m.CPU.ReadIO(0x1C))
+	if (m.CPU.ReadIO(0x04) & 0x08) == 0 {
+		t.Errorf("Expected bit 3 set, got %02X", m.CPU.ReadIO(0x04))
 	}
 
 	_ = m.Step()
-	if (m.CPU.ReadIO(0x1C) & 0x08) != 0 {
-		t.Errorf("Expected bit 3 cleared, got %02X", m.CPU.ReadIO(0x1C))
+	if (m.CPU.ReadIO(0x04) & 0x08) != 0 {
+		t.Errorf("Expected bit 3 cleared, got %02X", m.CPU.ReadIO(0x04))
 	}
 }
 
 func TestSBIC_SBIS(t *testing.T) {
 	m := mcu.NewATmega32u4()
-	// SBIC 0x1C, 3 -> 0x99E3
-	m.FlashData[0] = 0x99E3
+	// SBIC 0x04, 3 -> 0x9923
+	m.FlashData[0] = 0x9923
 	m.FlashData[1] = 0x0000 // NOP (skipped)
 	m.FlashData[2] = 0x0000 // NOP
 
-	m.CPU.WriteIO(0x1C, 0x00) // Bit 3 is clear
+	m.CPU.WriteIO(0x04, 0x00) // Bit 3 is clear
 	_ = m.Step()
 	// SBIC at PC=0 should skip PC=1. PC should be 2.
 	if m.CPU.PC != 2 {
@@ -93,9 +93,9 @@ func TestSBIC_SBIS(t *testing.T) {
 	}
 
 	m.CPU.PC = 0
-	// SBIS 0x1C, 3 -> 0x9BE3
-	m.FlashData[0] = 0x9BE3
-	m.CPU.WriteIO(0x1C, 0x08) // Bit 3 is set
+	// SBIS 0x04, 3 -> 0x9B23
+	m.FlashData[0] = 0x9B23
+	m.CPU.WriteIO(0x04, 0x08) // Bit 3 is set
 	_ = m.Step()
 	// SBIS at PC=0 should skip PC=1. PC should be 2.
 	if m.CPU.PC != 2 {

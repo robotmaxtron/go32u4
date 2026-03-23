@@ -23,7 +23,7 @@ func TestMCUMemoryMapping(t *testing.T) {
 	}
 
 	// SRAM Mapping
-	// SRAM starts after IO registers (32 + 256 = 288)
+	// SRAM starts at 32 + 256 = 288 (0x120)
 	m.WriteSRAM(288, 0xBE)
 	if m.SRAMData[0] != 0xBE {
 		t.Errorf("Expected SRAMData[0] 0xBE, got %02X", m.SRAMData[0])
@@ -67,7 +67,7 @@ func TestReadSRAM(t *testing.T) {
 	if val := m.ReadSRAM(288); val != 0xAA {
 		t.Errorf("ReadSRAM(288) = %02X, expected 0xAA", val)
 	}
-	if val := m.ReadSRAM(288+100); val != 0xBB {
+	if val := m.ReadSRAM(388); val != 0xBB {
 		t.Errorf("ReadSRAM(388) = %02X, expected 0xBB", val)
 	}
 	if val := m.ReadSRAM(288+uint16(len(m.SRAMData))-1); val != 0xCC {
